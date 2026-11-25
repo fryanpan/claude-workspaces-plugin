@@ -117,8 +117,8 @@ describe('the time column', () => {
     expect(root.querySelector('.library-sort')).toBeNull();
     expect(recent(root).querySelector('.lf-colhead')?.textContent).toBe('Created');
     // delay-alerts.md changed an hour ago but was made twenty days ago, so it
-    // sits last. README.md is a project file with no doc: its bytes' birth
-    // cannot tell made from rewritten, so it is not listed here.
+    // sits last. README.md is a project file the board did not make: it has
+    // no created time, so it is not listed here.
     expect(cells(recent(root))).toEqual([
       ['dock-survey.md', '2h ago'],
       ['Booking flow walkthrough', '4h ago'],
@@ -192,13 +192,37 @@ describe('the time column', () => {
       'created',
     );
     // By creation: dock-survey.md (2h), the nine meetings (4-12h, the last
-    // made first), delay-alerts.md (20d), then README.md, with no birth time.
+    // made first), delay-alerts.md (20d), then README.md, with no created time.
     expect(cells(root).map((c) => c[0])).toEqual([
       'dock-survey.md',
       ...Array.from({ length: 9 }, (_, i) => `Delay alert timing ${9 - i}`),
       'delay-alerts.md',
       'README.md',
     ]);
+  });
+
+  it('opens "See all" under Recently Created on the full list sorted by Created', async () => {
+    const many: LibraryPayload = {
+      ...PAYLOAD,
+      meetings: Array.from({ length: 9 }, (_, i) => ({
+        name: `Delay alert timing ${i + 1}`,
+        at: NOW - i * HOUR,
+        created: NOW - (12 - i) * HOUR,
+        href: `/m/${i}`,
+        docId: `m-${i + 10}`,
+      })),
+    };
+    const { page, root } = drive(many, 'created');
+    await page.open();
+    const tab = cells(recent(root)).map((c) => c[0]);
+    await click(root.querySelector('.library-more[data-list=files]') as HTMLElement);
+    const sort = root.querySelector('.library-sort[data-list=files]') as HTMLSelectElement;
+    expect(sort.value).toBe('created');
+    // The full list continues the tab's order: the same ten first, by the
+    // same created time, then what the board did not make.
+    const all = cells(root).map((c) => c[0]);
+    expect(all.slice(0, tab.length)).toEqual(tab);
+    expect(all.at(-1)).toBe('README.md');
   });
 });
 

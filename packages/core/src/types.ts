@@ -253,6 +253,14 @@ export interface DocMeta {
    */
   bindingLostAt?: number;
   /**
+   * True once a bind filled this empty doc from a file that was already on
+   * disk: the doc gave an existing file a record, and the board made
+   * nothing. Never cleared. The Library leaves such a doc
+   * off Recently Created (`createdOnBoard`). Private-meta: it is a fact about
+   * the host's disk, and nothing on the client reads it.
+   */
+  seededFromFile?: boolean;
+  /**
    * The workspace's own bind-time configuration, replicated onto every
    * member the same way `workspaceRoot` is — there is no workspace registry,
    * so the members ARE the record. `refresh_workspace` reads these back and

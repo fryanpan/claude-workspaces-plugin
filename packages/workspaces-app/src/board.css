@@ -5542,16 +5542,15 @@ html:has(.board-walk-cred-form) {
   display: flex;
   gap: 4px;
 }
-.lf-recent-tab {
+/* 44px tall, and 8px a side, not the task panel's 12: the three labels then
+   sit on one line at 430 (measured: they end at x=412, the row at 416).
+   Where a font runs wider a label wraps to two lines inside the same 44px
+   tab, so the row never scrolls sideways and nothing below it moves. Scoped
+   under the list so it outranks `.board-detail-tab` (40px, 12px a side),
+   which sits later in this sheet. */
+.lf-tablist .lf-recent-tab {
   min-height: var(--lf-hit);
   margin-bottom: -1px;
-}
-/* 8px a side, not the task panel's 12: the three labels then sit on one line
-   at 430 (measured: they end at x=412, the row at 416). Where a font runs
-   wider a label wraps to two lines inside the same 44px tab, so the row
-   never scrolls sideways and nothing below it moves. Scoped under the list
-   so it outranks `.board-detail-tab`, which sits later in this sheet. */
-.lf-tablist .lf-recent-tab {
   padding: 0 8px;
 }
 .lf-tablist .lf-recent-tab:first-child {

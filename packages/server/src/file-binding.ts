@@ -835,6 +835,13 @@ export class FileBindings {
         if (blocks.length > 0) {
           doc.ydoc.transact(() => fragment.push(blocks), 'file-seed');
           seeded = true;
+          // An empty doc took its content from a file already on disk, so
+          // the board made nothing (`seededFromFile`). Persisted below with
+          // `sourceUrl`, or here when the record already named the path.
+          if (doc.meta.seededFromFile !== true) {
+            doc.meta.seededFromFile = true;
+            this.p.schedulePersist(doc);
+          }
         }
       } catch (err) {
         if (isDataless(err))

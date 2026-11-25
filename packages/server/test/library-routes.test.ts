@@ -273,8 +273,10 @@ describe('library routes', () => {
 
     const lib = await items();
     const listed = lib.files.find((f) => f.open === 'notes/survey.md');
-    // Its Created is read in the side checkout too: the main one has no such file.
-    expect(listed?.created).toBeGreaterThan(0);
+    // Listed from the side checkout: the main one has no such file. A project
+    // file the board did not make carries no created time.
+    expect(listed?.at).toBeGreaterThan(0);
+    expect(listed?.created).toBeUndefined();
     // Positive control on the same server: the main checkout's own file opens.
     expect((await open('docs/tide-gauge.md')).status).toBe(200);
 

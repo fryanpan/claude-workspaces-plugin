@@ -114,6 +114,40 @@ describe('the Recently Viewed / Modified / Created tabs', () => {
     expect(again.storage.values.get('cw-library-recent-tab')).toBe('viewed');
   });
 
+  it('opens a device that stored "created" before this change on the real Created list', async () => {
+    // The old tab under the "Recently Created" label stored `created` and
+    // listed by last change. That stored value now opens the list its label
+    // names: board docs by when the board made each, not the newest edit.
+    const { page, root } = drive({ recentTab: 'created' });
+    await page.open();
+    expect(chosenTab(root)).toBe('Recently Created');
+    expect(recentTable(root).querySelector('.lf-colhead')?.textContent).toBe('Created');
+    expect(names(recentTable(root))).toEqual(['Saltmarsh plan', 'Harborlight charter']);
+  });
+
+  it('keeps a burst opened under one tab shut under the other', async () => {
+    // Three board docs made and changed seconds apart: one burst under both
+    // Modified and Created, with the same newest file heading each.
+    const burst: LibraryPayload = {
+      ...PAYLOAD,
+      files: ['Quay layout', 'Tide chart', 'Ferry flow'].map((name, i) => ({
+        name,
+        at: NOW - i * 1_000,
+        created: NOW - i * 1_000,
+        href: `/workspaces/${WS}/whiteboards/b-${i}`,
+        docId: `b-${i}`,
+      })),
+    };
+    const { page, root } = driveLibrary(WS, burst, NOW, { payload: burst, recentTab: 'created' });
+    await page.open();
+    const head = (tab: string) =>
+      panelTable(root, tab).querySelector('.library-burst-head') as HTMLElement;
+    await click(head('created'));
+    expect(head('created').getAttribute('aria-expanded')).toBe('true');
+    await click(root.querySelector('[data-lf-tab=modified]') as HTMLElement);
+    expect(head('modified').getAttribute('aria-expanded')).toBe('false');
+  });
+
   it('moves between the tabs with the arrow keys, the chosen tab the only Tab stop', async () => {
     const { page, root } = drive();
     await page.open();

@@ -245,25 +245,26 @@ describe('buildLibrary', () => {
     ]);
   });
 
-  it('dates a board doc as created at the EARLIER of its record and its file’s birth', () => {
-    // A `git pull` that changes a file writes a new one, so the bytes' birth
-    // moves with every edit that arrives that way: the record is earlier.
-    // Opening a year-old file from the Library makes its record now: the
-    // birth is earlier. Either way the later clock is not when it was made.
+  it('dates only what the board made as created; a doc that binds an existing file has none', () => {
+    // `d-made` is a doc the board wrote. `d-bound` filled itself from a file
+    // already on disk, and `library-…` is the open verb's doc from before the
+    // flag existed: neither made anything, so neither is created, whatever
+    // their records say.
     const lib = buildLibrary(
       sources({
         docs: [
-          meta('d-pulled', { title: 'Saltmarsh plan', createdAt: 1_000 }),
-          meta('d-opened', { title: 'Harborlight readme', createdAt: 9_000 }),
+          meta('d-made', { title: 'Saltmarsh plan', createdAt: 1_000 }),
+          meta('d-bound', { title: 'Harborlight readme', createdAt: 9_000, seededFromFile: true }),
+          meta('library-0f1e', { title: 'Riverbend notes', createdAt: 9_100 }),
         ],
         docKeyOf: (id) => makeDocKey(REPO, `docs/${id}.md`),
         projectRoot: () => null,
         fileMtime: () => 9_500,
-        fileBirth: (id) => (id === 'd-pulled' ? 9_000 : 2_000),
       }),
     );
     expect(lib.files.map((r) => [r.name, r.created]).sort()).toEqual([
-      ['Harborlight readme', 2_000],
+      ['Harborlight readme', undefined],
+      ['Riverbend notes', undefined],
       ['Saltmarsh plan', 1_000],
     ]);
   });

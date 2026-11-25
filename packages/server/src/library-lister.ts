@@ -6,7 +6,7 @@ import { boundFiles } from './slow-fs.ts';
 
 /**
  * The project's markdown files, as the Library lists them: the repo walk and
- * the stat behind each row's two clocks. Split out of `library.ts`, which
+ * the stat behind each row's modified clock. Split out of `library.ts`, which
  * re-exports all three names, so the build there stays a pure function over
  * injected sources.
  */
@@ -16,26 +16,30 @@ export interface ProjectFile {
   /** POSIX, relative to the repo root. */
   relPath: string;
   mtimeMs: number;
-  /** Birth time, when the filesystem reports one. */
-  createdMs?: number;
-}
-
-/** A stat's birth time, when the filesystem keeps one (0 or less means it
- *  does not). */
-export function birthOf(st: { birthtimeMs: number }): { createdMs?: number } {
-  return st.birthtimeMs > 0 ? { createdMs: st.birthtimeMs } : {};
 }
 
 /**
- * When a board doc was made: the EARLIER of its record and its file's birth.
- * Each clock alone reads late. A `git pull` that changes a file writes a new
- * one, so the birth moves with every edit that arrives that way (which is
- * how Recently Created came to read as Recently Modified); and opening an
- * old project file from the Library, or attaching it, makes the record now.
- * An agent's doc counts as made as much as a person's.
+ * When the board made this doc, or undefined when it made nothing.
+ *
+ * Recently Created lists content born on the board: a new board doc, or a
+ * new file an agent wrote through the doc tools. A doc whose first bind read
+ * its content from a file already on disk (`seededFromFile`) only gave an
+ * old file a new record, so it has no created time. No file clock stands in:
+ * a `git pull` or a fresh clone writes a new file, so a birth time moves
+ * with every change that arrives that way, which is how Recently Created
+ * came to read as Recently Modified.
+ *
+ * A `library-` doc is the Library's open verb binding a listed file. Those
+ * made before `seededFromFile` existed carry no flag, and the open verb only
+ * ever binds a file that is already there.
  */
-export function madeAt(recordAt: number, fileBirth: number | undefined): number {
-  return fileBirth === undefined ? recordAt : Math.min(recordAt, fileBirth);
+export function createdOnBoard(meta: {
+  docId: string;
+  createdAt: number;
+  seededFromFile?: boolean;
+}): number | undefined {
+  if (meta.seededFromFile === true || meta.docId.startsWith('library-')) return undefined;
+  return meta.createdAt;
 }
 
 /** How long one repo walk is reused. A Library load is a page view, and a
@@ -124,7 +128,7 @@ function statOne(root: string, relPath: string): ProjectFile | null {
   } catch {
     return null;
   }
-  return st.isFile() ? { relPath, mtimeMs: st.mtimeMs, ...birthOf(st) } : null;
+  return st.isFile() ? { relPath, mtimeMs: st.mtimeMs } : null;
 }
 
 function statAll(root: string, rels: readonly string[]): ProjectFile[] {

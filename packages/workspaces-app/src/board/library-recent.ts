@@ -6,10 +6,12 @@
  * and never an agent's reads); Recently Modified, every file by its last
  * change; and Recently Created, the board's docs by when the board made each.
  *
- * Recently Created lists board docs only. A project file nobody opened has
- * no record, only its bytes' birth time, and a `git pull` that changes a
- * file writes a new one, so that clock cannot tell a new file from an edited
- * one. It was the whole reason the old Created tab read as Modified.
+ * Recently Created lists what the board made: a new board doc, or a new file
+ * an agent wrote through the doc tools. A project file, opened or not, has
+ * no created time (the server's `createdOnBoard`): its only clock is its
+ * bytes' birth time, and a `git pull` that changes a file writes a new one,
+ * so that clock cannot tell a new file from an edited one. It was the whole
+ * reason the old Created tab read as Modified.
  *
  * Markup and the stored tab choice; `library-page.ts` wires the events.
  */
@@ -156,7 +158,7 @@ function clockPanelHtml(
   const entries = fileEntries(rows, clock, (r) => meetings.has(r));
   const more =
     entries.length > LIBRARY_RECENT.files
-      ? '<button type="button" class="library-more" data-list="files">See all files</button>'
+      ? `<button type="button" class="library-more" data-list="files" data-sort="${clock}">See all files</button>`
       : '';
   const shown = entries
     .slice(0, LIBRARY_RECENT.files)
@@ -165,7 +167,7 @@ function clockPanelHtml(
   const head = clock === 'created' ? 'Created' : 'Modified';
   const empty =
     clock === 'created'
-      ? 'No board docs yet. Project files are under Recently Modified.'
+      ? 'Nothing made on this board yet. Files already in the project are under Recently Modified.'
       : 'No files yet.';
   return `${fixedTable(head, shown, empty)}${more}`;
 }

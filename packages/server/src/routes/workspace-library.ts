@@ -12,7 +12,6 @@ import {
   type LibrarySources,
   type MarkdownLister,
   type ProjectFile,
-  birthOf,
   buildLibrary,
   createMarkdownLister,
   openableFiles,
@@ -210,8 +209,8 @@ function sourcesFor(
   const all = docStore.list();
   const docs = all.filter((m) => ids.has(m.docId) && !setHidden(m));
   const boundPaths = new Map(docs.map((m) => [m.docId, m.sourceUrl]));
-  // One stat per bound doc per load, shared by both of its clocks.
-  const stats = new Map<string, { mtimeMs: number; birthtimeMs: number } | undefined>();
+  // One stat per bound doc per load.
+  const stats = new Map<string, { mtimeMs: number } | undefined>();
   const statOf = (docId: string) => {
     if (stats.has(docId)) return stats.get(docId);
     const st = statBound(boundPaths.get(docId));
@@ -258,7 +257,6 @@ function sourcesFor(
     // every doc on the board to draw a list of them is the wrong price for a
     // page view.
     fileMtime: (docId) => statOf(docId)?.mtimeMs,
-    fileBirth: (docId) => birthOf(statOf(docId) ?? { birthtimeMs: 0 }).createdMs,
     projectRoot: (repoKey) => (hidden(repoKey) ? null : mounts.rootFor(repoKey)),
     // The project's own git listing is a SECOND way a hidden folder's names
     // could leave: a markdown file under a local-only mount is listed by
@@ -268,27 +266,11 @@ function sourcesFor(
       hiddenFolders.length === 0
         ? lister(root)
         : lister(root).filter((f) => !hiddenFolders.some((d) => under(f.relPath, d))),
-    mountedFiles: (repoKey) => {
-      // Each file's birth time is read in the checkout its MOUNT was made
-      // from, which may be a worktree the project root is not.
-      const roots = new Map<string, string | null>();
-      const rootOf = (mountId: string): string | null => {
-        if (!roots.has(mountId)) {
-          const mount = mounts.registry.mountById(repoKey, mountId);
-          roots.set(mountId, mount ? mounts.checkoutRootOf(repoKey, mount) : null);
-        }
-        return roots.get(mountId) ?? null;
-      };
-      const files = mounts
+    mountedFiles: (repoKey) =>
+      mounts
         .listFiles(repoKey, { limit: MAX_MOUNTED_FILES })
-        .files.filter((f) => !mountHidden(repoKey, f.mountId));
-      return files.map((f) => {
-        const root = rootOf(f.mountId);
-        const st = root ? statBound(join(root, f.relPath)) : undefined;
-        const born = st ? birthOf(st) : {};
-        return { fileId: f.fileId, relPath: f.relPath, mtimeMs: f.mtimeMs, ...born };
-      });
-    },
+        .files.filter((f) => !mountHidden(repoKey, f.mountId))
+        .map((f) => ({ fileId: f.fileId, relPath: f.relPath, mtimeMs: f.mtimeMs })),
     // Where each doc lives. Folders are repo-relative and storage is a
     // phrase; the data dir is only compared against, never named.
     placing: {
@@ -319,13 +301,13 @@ function sourcesFor(
  * blank the Library instead. `statSync` never materializes a cloud-synced
  * file, so an online-only file costs a syscall rather than a download.
  */
-function statBound(path: string | undefined): { mtimeMs: number; birthtimeMs: number } | undefined {
+function statBound(path: string | undefined): { mtimeMs: number } | undefined {
   if (path === undefined || !path.startsWith('/')) return undefined;
   try {
     // Through the bound-file guard, which never stats a link for where it
     // points under a walled lead's project.
     const st = boundFiles.guards.statSync(path);
-    return st.isFile() ? { mtimeMs: st.mtimeMs, birthtimeMs: st.birthtimeMs } : undefined;
+    return st.isFile() ? { mtimeMs: st.mtimeMs } : undefined;
   } catch {
     return undefined;
   }
