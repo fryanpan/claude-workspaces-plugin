@@ -353,9 +353,10 @@ async function emit(buildId: string): Promise<boolean> {
     // Observable Plot, fetched by `mdx-plot-chart.ts` the first time a doc
     // shows a `<PlotChart>`, for KaTeX's reason above.
     ['plot', 'plot-entry.ts'],
-    // Leaflet, for a `<StreetMap>` (`mdx-street-map.ts`), for the same
-    // reason; its stylesheet beside it. Markers are drawn as paths, so
-    // Leaflet's marker images are never asked for and are not copied.
+    // The components package's map and Leaflet, for a `<StreetMap>`
+    // (`mdx-street-map.ts`), for the same reason. The map puts Leaflet's
+    // stylesheet on the page itself, and draws markers as paths, so neither
+    // the stylesheet nor Leaflet's marker images are copied.
     ['map', 'map-entry.ts'],
   ] as const) {
     const result = await Bun.build({
@@ -374,10 +375,6 @@ async function emit(buildId: string): Promise<boolean> {
       return false;
     }
   }
-  const leafletDist = dirname(
-    createRequire(join(pkgRoot, 'package.json')).resolve('leaflet/dist/leaflet.css'),
-  );
-  cpSync(join(leafletDist, 'leaflet.css'), join(dist, 'map', 'leaflet.css'));
   const katexDist = dirname(
     createRequire(join(pkgRoot, 'package.json')).resolve('katex/dist/katex.min.css'),
   );

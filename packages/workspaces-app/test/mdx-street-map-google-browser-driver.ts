@@ -112,7 +112,7 @@ const tag = (basemap?: string) =>
 
 /** Ready once the map has drawn and a tile has loaded; null until then. */
 const READ_PAGE = `(() => {
-  const slot = document.querySelector('#editor .mdx-map');
+  const slot = document.querySelector('#editor .mdx-map .cw-map-slot');
   if (!slot || !slot.dataset.markers || !slot.dataset.basemap) return null;
   const loaded = [...slot.querySelectorAll('.leaflet-tile-loaded')];
   const src = (t) => (t.tagName === 'IMG' ? t : t.querySelector('img'))?.src ?? '';
@@ -124,7 +124,7 @@ const READ_PAGE = `(() => {
   const corners = slot.querySelector('.leaflet-control-container')?.textContent ?? '';
   // Google's corners move into the map a moment after its tiles: wait for them.
   if (googleTiles > 0 && !corners.includes(${JSON.stringify(GOOGLE_CREDIT)})) return null;
-  const notice = slot.parentElement.querySelector('.mdx-map-fallback');
+  const notice = slot.closest('.cw-map')?.querySelector('.cw-map-notice');
   return {
     basemap: slot.dataset.basemap,
     markerPaths: slot.querySelectorAll('path.cw-map-marker').length,

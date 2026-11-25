@@ -1,36 +1,34 @@
-import { whenPlaced } from '@claude-workspaces/components/placed';
 /**
- * A `<StreetMap>` in a bound `.mdx`: a street map with markers, popups,
- * radius rings and category-coloured points, drawn in the doc page itself
- * (components design, decision 2: no frames), with a legend under it.
+ * A `<StreetMap>` in a bound `.mdx`: the components package's map
+ * (`components/src/map.ts`, its default export) mounted in the doc page
+ * itself (components design, decision 2: no frames). This file draws nothing
+ * of its own. It reads the tag, fetches what the mount needs, and hands it
+ * over: the tag's literal props merged with the JSON file its `src` names
+ * beside the doc, the doc's live state hook for the tag's `id`, and the key
+ * for a keyed basemap, which the server hands only to a doc that draws on it.
  *
- * The tag's literal props, and the JSON file its `src` names beside the doc,
- * are judged by core `map-spec.ts`; the basemap comes from core
- * `map-basemaps.ts` by name, so tiles load only from the origins listed there
- * (decision 7). Leaflet is fetched the first time a doc shows a map, from
- * `/app/map/map.js`, by the same by-value import `mdx-plot-chart.ts` uses, and
- * its stylesheet from beside it.
+ * The tag's props and the `src` file are judged by core `map-spec.ts`; the
+ * basemap comes from core `map-basemaps.ts` by name, so tiles load only from
+ * the origins listed there (decision 7). The map, with Leaflet and its
+ * stylesheet, is fetched the first time a doc shows a map, from
+ * `/app/map/map.js`, by the same by-value import `mdx-plot-chart.ts` uses.
  *
- * A spec that does not read draws an error box in the map's place, in the
+ * A tag that does not read draws an error box in the map's place, in the
  * class `mdx-flow-block.ts` reads a chart's failure from.
  */
-import { type Basemap, DEFAULT_BASEMAP, basemapOf } from '@claude-workspaces/core/map-basemaps';
-import {
-  type MapSpec,
-  mapDataSegments,
-  mergeMapData,
-  readMapSpec,
-} from '@claude-workspaces/core/map-spec';
+import { DEFAULT_BASEMAP, basemapOf } from '@claude-workspaces/core/map-basemaps';
+import { mapDataSegments, mergeMapData, readMapSpec } from '@claude-workspaces/core/map-spec';
+import type { StateHook } from '@claude-workspaces/core/mdx-component-runtime';
 import { api, docIdFromPathOrNull } from './doc-path.ts';
-import type { KeyedBase, renderMapInto } from './map-entry.ts';
+import type { mountMap } from './map-entry.ts';
 import { UNREADABLE } from './mdx-chart-props.ts';
 
 /** What `/app/map/map.js` exports. */
 export interface MapChunk {
-  renderMapInto: typeof renderMapInto;
+  mountMap: typeof mountMap;
 }
 
-/** Where the build puts Leaflet and its stylesheet. */
+/** Where the build puts the map and Leaflet. */
 export const MAP_BASE = '/app/map/';
 
 export interface StreetMapSummary {
@@ -57,18 +55,11 @@ export function streetMapOf(props: Map<string, unknown>): StreetMapSummary {
   return out;
 }
 
-let ready: MapChunk | null = null;
 let loading: Promise<MapChunk | null> | null = null;
 
 function fetchFromApp(): Promise<MapChunk | null> {
-  if (!document.querySelector('link[data-cw-leaflet]')) {
-    const css = document.createElement('link');
-    css.rel = 'stylesheet';
-    css.href = `${MAP_BASE}leaflet.css`;
-    css.dataset.cwLeaflet = '';
-    document.head.appendChild(css);
-  }
-  // Built at runtime so the bundler cannot fold it into a literal it might
+  // The map puts Leaflet's stylesheet on the page itself. The address is
+  // built at runtime so the bundler cannot fold it into a literal it might
   // try to resolve and inline.
   const url = new URL(`${MAP_BASE}map.js`, location.href).href;
   return (import(url) as Promise<MapChunk>).then(
@@ -84,7 +75,6 @@ export function setMapForTest(
   api: MapChunk | null,
   fetcher: (() => Promise<MapChunk | null>) | null = null,
 ): void {
-  ready = api;
   loading = api ? Promise.resolve(api) : null;
   fetchMap = fetcher ?? fetchFromApp;
 }
@@ -92,8 +82,7 @@ export function setMapForTest(
 function loadMap(): Promise<MapChunk | null> {
   if (loading) return loading;
   const pending = fetchMap().then((chunk) => {
-    if (chunk) ready = chunk;
-    else if (loading === pending) loading = null;
+    if (!chunk && loading === pending) loading = null;
     return chunk;
   });
   loading = pending;
@@ -156,160 +145,130 @@ async function keyFor(basemap: string): Promise<{ key: string } | { reason: stri
   }
 }
 
-function errorBox(slot: HTMLElement, message: string): void {
+function errorBox(box: HTMLElement, message: string): void {
+  const err = document.createElement('div');
+  err.className = 'plot-spec-error';
+  err.setAttribute('role', 'alert');
+  err.textContent = message;
+  box.style.removeProperty('height');
+  box.classList.remove('is-pending');
+  box.replaceChildren(err);
+}
+
+/** A tag's live state, as `renderStreetMap` is handed it: a hook the page
+ *  made for this drawing alone carries `dispose`, run when the drawing goes. */
+export type MapStateFor = (id: string) => (StateHook & { dispose?: () => void }) | undefined;
+
+/** Whether the state holds anything, so the tag's own props are not the
+ *  whole map. */
+const holds = (state: StateHook | undefined): boolean => {
+  const v = state?.get();
+  return typeof v === 'object' && v !== null && Object.keys(v).length > 0;
+};
+
+/**
+ * Mount the map in a box appended to `host`. The box holds the map's height
+ * from the start, so the doc does not move when the map and its data arrive.
+ * Returns the release: it removes the map and drops its state hook.
+ *
+ * A tag whose props do not read, with no state to read instead, fails here
+ * and at once, so `mdx-flow-block.ts` sees it while the block is drawing.
+ */
+export function renderStreetMap(
+  host: HTMLElement,
+  summary: StreetMapSummary,
+  stateFor?: MapStateFor,
+): () => void {
   const box = document.createElement('div');
-  box.className = 'plot-spec-error';
-  box.setAttribute('role', 'alert');
-  box.textContent = message;
-  slot.style.removeProperty('height');
-  slot.classList.remove('is-pending');
-  slot.replaceChildren(box);
-}
-
-/** The legend: a swatch per category, then a ring swatch per ring. */
-function legendOf(spec: MapSpec): HTMLElement | null {
-  if (!spec.legend || (spec.categories.length === 0 && spec.rings.length === 0)) return null;
-  const list = document.createElement('ul');
-  list.className = 'mdx-map-legend';
-  const item = (label: string, color: string, ring: boolean) => {
-    const li = document.createElement('li');
-    const swatch = document.createElement('span');
-    swatch.className = ring ? 'mdx-map-swatch is-ring' : 'mdx-map-swatch';
-    swatch.style.setProperty(ring ? 'border-color' : 'background-color', color);
-    const words = document.createElement('span');
-    words.textContent = label;
-    li.append(swatch, words);
-    list.appendChild(li);
-  };
-  for (const c of spec.categories) item(c.name, c.color, false);
-  for (const r of spec.rings) item(r.label, r.color, true);
-  return list;
-}
-
-/** The spec the summary describes, its `src` file read first. */
-async function specOf(summary: StreetMapSummary): Promise<MapSpec> {
-  if (summary.unreadable.length > 0) {
-    throw new Error(`Not a literal, so not drawn: ${summary.unreadable.join(', ')}`);
-  }
-  const file = summary.src === undefined ? undefined : await fetchData(summary.src);
-  const read = readMapSpec(mergeMapData(summary.props, file));
-  if (!read.ok) throw new Error(read.error);
-  return read.spec;
-}
-
-function draw(
-  chunk: MapChunk,
-  slot: HTMLElement,
-  legendAt: HTMLElement,
-  notice: HTMLElement,
-  spec: MapSpec,
-): void {
-  const base = basemapOf(spec.basemap);
-  if (!base) throw new Error(`no basemap "${spec.basemap}"`);
-  slot.style.height = `${spec.height}px`;
-  const legend = legendOf(spec);
-  if (legend) legendAt.replaceChildren(legend);
-  const start = (on: Basemap, name: string, keyed?: KeyedBase) =>
-    whenPlaced(slot, () => {
-      slot.classList.remove('is-pending');
-      slot.dataset.basemap = name;
-      try {
-        const { drawn } = chunk.renderMapInto(slot, spec, on, keyed);
-        slot.dataset.markers = String(drawn.markers);
-        slot.dataset.rings = String(drawn.rings);
-        slot.dataset.points = String(drawn.points);
-      } catch (err) {
-        errorBox(slot, err instanceof Error ? err.message : String(err));
-      }
-    });
-  if (!base.key) {
-    start(base, spec.basemap);
-    return;
-  }
-  const insteadName = base.fallback ?? DEFAULT_BASEMAP;
-  const instead = basemapOf(insteadName);
-  if (!instead) throw new Error(`no basemap "${insteadName}"`);
-  const fellBack = (why: string) => {
-    slot.dataset.basemap = insteadName;
-    notice.textContent = (FELL_BACK[why] ?? FELL_BACK['no-key'])?.(base.label, instead.label) ?? '';
-    notice.hidden = false;
-  };
-  void keyFor(spec.basemap).then((got) => {
-    if ('key' in got) {
-      start(base, spec.basemap, { key: got.key, fallback: instead, fellBack });
-    } else {
-      start(instead, insteadName);
-      // A map that took the default basemap draws on the fallback quietly
-      // when the server holds no key: nobody asked for Google.
-      if (spec.basemapNamed) fellBack(got.reason);
-    }
-  });
-}
-
-/** Append the map, its subtitle above and its legend and note below, to
- *  `host`. The slot holds the map's height from the start, so the doc does
- *  not move when Leaflet and the data arrive. */
-export function renderStreetMap(host: HTMLElement, summary: StreetMapSummary): void {
-  if (summary.subtitle) {
-    const sub = document.createElement('div');
-    sub.className = 'mdx-subtitle';
-    sub.textContent = summary.subtitle;
-    host.appendChild(sub);
-  }
-  const slot = document.createElement('div');
-  slot.className = 'mdx-map is-pending';
+  box.className = 'mdx-map is-pending';
   const height = summary.props.height;
-  slot.style.height = `${typeof height === 'number' ? Math.min(1200, Math.max(160, height)) : 480}px`;
+  box.style.height = `${typeof height === 'number' ? Math.min(1200, Math.max(160, height)) : 480}px`;
   // A tap or drag on the map works the map; it does not open the source.
   for (const type of ['click', 'mousedown', 'pointerdown', 'touchstart']) {
-    slot.addEventListener(type, (e) => {
-      if (slot.querySelector('.leaflet-container, .leaflet-pane')) e.stopPropagation();
+    box.addEventListener(type, (e) => {
+      if (box.querySelector('.leaflet-container, .leaflet-pane')) e.stopPropagation();
     });
   }
-  host.appendChild(slot);
-  // Says so when a keyed basemap (Google) is drawn on its fallback instead.
-  const notice = document.createElement('div');
-  notice.className = 'mdx-chart-note mdx-map-fallback';
-  notice.setAttribute('role', 'status');
-  notice.hidden = true;
-  host.appendChild(notice);
-  const legendAt = document.createElement('div');
-  host.appendChild(legendAt);
-  if (summary.note) {
-    const note = document.createElement('div');
-    note.className = 'mdx-chart-note mdx-map-note';
-    note.textContent = summary.note;
-    host.appendChild(note);
+  host.appendChild(box);
+  let handle: (() => void) | null = null;
+  let released = false;
+  const id = typeof summary.props.id === 'string' ? summary.props.id : undefined;
+  const state = id === undefined ? undefined : stateFor?.(id);
+  const release = (): void => {
+    released = true;
+    handle?.();
+    handle = null;
+    state?.dispose?.();
+  };
+  const fail = (err: unknown) => errorBox(box, err instanceof Error ? err.message : String(err));
+  if (summary.unreadable.length > 0) {
+    fail(new Error(`Not a literal, so not drawn: ${summary.unreadable.join(', ')}`));
+    return release;
   }
-  const fail = (err: unknown) => errorBox(slot, err instanceof Error ? err.message : String(err));
-  // Synchronous when nothing has to be fetched, so a spec that does not read
-  // fails while the block is still drawing and `mdx-flow-block.ts` sees it.
-  if (ready && summary.src === undefined) {
+  if (summary.src === undefined && !holds(state)) {
+    const read = readMapSpec(summary.props);
+    if (!read.ok) {
+      fail(new Error(read.error));
+      return release;
+    }
+  }
+  // The card draws the title; the map draws the subtitle, legend and note.
+  const { title: _title, ...props } = summary.props;
+  const mount = (chunk: MapChunk, merged: Record<string, unknown>, notice?: string): void => {
+    if (released || !box.isConnected) return;
+    box.classList.remove('is-pending');
+    box.style.removeProperty('height');
     try {
-      const read = readMapSpec(summary.props);
-      if (summary.unreadable.length > 0) {
-        throw new Error(`Not a literal, so not drawn: ${summary.unreadable.join(', ')}`);
-      }
-      if (!read.ok) throw new Error(read.error);
-      draw(ready, slot, legendAt, notice, read.spec);
+      handle = chunk.mountMap(box, merged, state);
     } catch (err) {
       fail(err);
+      return;
     }
-    return;
-  }
-  void Promise.all([loadMap(), specOf(summary)]).then(
-    ([chunk, spec]) => {
+    const line = box.querySelector<HTMLElement>('.cw-map-notice');
+    if (notice && line) {
+      line.textContent = notice;
+      line.hidden = false;
+    }
+  };
+  const draw = (chunk: MapChunk, merged: Record<string, unknown>): void => {
+    const read = readMapSpec(merged);
+    const named = typeof merged.basemap === 'string';
+    const name = read.ok ? read.spec.basemap : named ? String(merged.basemap) : DEFAULT_BASEMAP;
+    const base = basemapOf(name);
+    if (!base) throw new Error(`no basemap "${name}"`);
+    if (!base.key) {
+      mount(chunk, { ...merged, basemap: name });
+      return;
+    }
+    const insteadName = base.fallback ?? DEFAULT_BASEMAP;
+    const instead = basemapOf(insteadName);
+    if (!instead) throw new Error(`no basemap "${insteadName}"`);
+    void keyFor(name).then((got) => {
+      if ('key' in got) {
+        mount(chunk, { ...merged, basemap: name, basemapKey: got.key });
+        return;
+      }
+      // A map that took the default basemap draws on the fallback quietly
+      // when the server holds no key: nobody asked for Google.
+      const why = named ? (FELL_BACK[got.reason] ?? FELL_BACK['no-key']) : undefined;
+      mount(chunk, { ...merged, basemap: insteadName }, why?.(base.label, instead.label));
+    });
+  };
+  const file = summary.src === undefined ? Promise.resolve(undefined) : fetchData(summary.src);
+  void Promise.all([loadMap(), file]).then(
+    ([chunk, data]) => {
       // Re-rendered while the fetch was in flight: that render won.
-      if (!slot.isConnected) return;
+      if (released || !box.isConnected) return;
       if (!chunk) return fail(new Error('The map could not be loaded'));
       try {
-        draw(chunk, slot, legendAt, notice, spec);
+        draw(chunk, mergeMapData(props, data));
       } catch (err) {
         fail(err);
       }
     },
     (err) => {
-      if (slot.isConnected) fail(err);
+      if (box.isConnected) fail(err);
     },
   );
+  return release;
 }

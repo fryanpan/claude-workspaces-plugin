@@ -1,7 +1,7 @@
 /**
- * The Leaflet drawing of a map: one renderer for the board's `<StreetMap>`
- * and for the package's map component (`map.ts`), so a board doc and a site
- * draw the same map from the same spec.
+ * The Leaflet drawing of the package's map component (`map.ts`), which a
+ * board doc's `<StreetMap>` and a site both mount, so they draw the same map
+ * from the same spec.
  *
  * It draws a spec `core/map-spec.ts` has already judged, on the basemap
  * `core/map-basemaps.ts` names. Markers and rings are SVG paths, so each is
@@ -10,7 +10,7 @@
  * A basemap drawn by its provider's own script (Google's) goes under the same
  * layers through `google.ts`.
  *
- * The board builds this file into `/app/map/map.js` through
+ * The board builds it, with `map.ts`, into `/app/map/map.js` through
  * `workspaces-app/src/map-entry.ts`, fetched the first time a doc shows a
  * `<StreetMap>`, so a page with no map pays nothing for it.
  */
@@ -209,15 +209,4 @@ function fitView(map: L.Map, spec: MapSpec, extra: L.LatLngBounds | null = null)
     bounds = bounds.extend(L.latLng(m.lat, m.lng).toBounds(reach * 2));
   }
   map.fitBounds(bounds, { padding: [16, 16], maxZoom: spec.zoom ?? 17 });
-}
-
-/** Draw `spec` into `slot`; returns the cleanup that removes the map. */
-export function renderMapInto(
-  slot: HTMLElement,
-  spec: MapSpec,
-  base: Basemap,
-  keyed?: KeyedBase,
-): { drawn: MapDrawn; remove: () => void } {
-  const live = createLiveMap(slot, base, keyed);
-  return { drawn: live.draw(spec, true), remove: () => live.remove() };
 }

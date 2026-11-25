@@ -1,3 +1,4 @@
+import { COMPONENT_STATE_ID, createStateHook } from '@claude-workspaces/core/mdx-component-state';
 import { MDX_FLOW_LANGUAGE } from '@claude-workspaces/core/prose';
 import type { Editor, NodeViewRendererProps } from '@tiptap/core';
 import type { Node as PMNode, Slice } from '@tiptap/pm/model';
@@ -5,8 +6,14 @@ import { Plugin, PluginKey } from '@tiptap/pm/state';
 import { AddMarkStep, RemoveMarkStep, ReplaceStep, type Step } from '@tiptap/pm/transform';
 import type { EditorView, NodeView } from '@tiptap/pm/view';
 import { ySyncPluginKey } from '@tiptap/y-tiptap';
-import { ComponentMount, componentKeyOf, componentLiveOf } from './mdx-component.ts';
+import {
+  type ComponentLive,
+  ComponentMount,
+  componentKeyOf,
+  componentLiveOf,
+} from './mdx-component.ts';
 import { type MdxSummary, renderMdxSummary, summarizeMdx } from './mdx-preview.ts';
+import type { MapStateFor } from './mdx-street-map.ts';
 
 /**
  * An `.mdx` component, expression or import run in the editor: a code block
@@ -47,19 +54,38 @@ const drewChart = (s: MdxSummary) =>
 const isChartTag = (s: MdxSummary) =>
   drewChart(s) || (s.kind === 'jsx' && (/Chart$/.test(s.label) || s.label === 'StreetMap'));
 
+/** The doc's live state for a `<StreetMap>`'s `id`, one hook per drawing,
+ *  disposed with it; none off a synced `.mdx` doc page. */
+function mapStateOf(live: ComponentLive | null): MapStateFor | undefined {
+  if (!live) return undefined;
+  return (id) =>
+    COMPONENT_STATE_ID.test(id)
+      ? createStateHook(live.ydoc, id, { canWrite: live.canWrite })
+      : undefined;
+}
+
 /** Draw `next` into `view`, and say why it failed when it did: the tag did not
  *  parse, it no longer reads as a chart, Plot refused its spec, or a drawing
- *  threw. */
-function drawInto(view: HTMLElement, next: MdxSummary, width: number): string | undefined {
+ *  threw. `release` takes down what the drawing mounted. */
+function drawInto(
+  view: HTMLElement,
+  next: MdxSummary,
+  width: number,
+  stateFor: MapStateFor | undefined,
+): { failed: string | undefined; release: () => void } {
+  let release = () => {};
   try {
-    renderMdxSummary(view, next, width);
+    release = renderMdxSummary(view, next, width, stateFor);
   } catch (err) {
-    return err instanceof Error ? err.message : String(err);
+    return { failed: err instanceof Error ? err.message : String(err), release };
   }
-  if (next.error) return next.error;
+  if (next.error) return { failed: next.error, release };
   if (!drewChart(next))
-    return 'This no longer reads as a chart: check its brackets, quotes and commas';
-  return view.querySelector('.plot-spec-error')?.textContent ?? undefined;
+    return {
+      failed: 'This no longer reads as a chart: check its brackets, quotes and commas',
+      release,
+    };
+  return { failed: view.querySelector('.plot-spec-error')?.textContent ?? undefined, release };
 }
 
 export function mdxFlowNodeView(
@@ -105,6 +131,9 @@ export function mdxFlowNodeView(
 
   // A component tag's live drawing, made the first time the block is one.
   const live = componentLiveOf(editor);
+  const stateFor = mapStateOf(live);
+  // Takes down the map the view last drew, and its state hook.
+  let release = () => {};
   let component: ComponentMount | null = null;
   const drawComponent = () => {
     if (!live) return;
@@ -132,6 +161,8 @@ export function mdxFlowNodeView(
     const key = live && next.kind === 'jsx' ? componentKeyOf(editor.state.doc, rendered) : null;
     if (key) {
       summary = next;
+      release();
+      release = () => {};
       drawComponent();
       view.dataset.kind = 'component';
       wrapper.dataset.kind = 'component';
@@ -151,12 +182,16 @@ export function mdxFlowNodeView(
     const keep = drewChart(summary) && (editing() || isChartTag(next));
     const kept = keep ? [...view.childNodes] : null;
     drawnAt = view.clientWidth;
-    const failed = drawInto(view, next, drawnAt);
+    const drew = drawInto(view, next, drawnAt, stateFor);
+    const failed = drew.failed;
     if (failed && kept) {
+      drew.release();
       view.replaceChildren(...kept);
       error.textContent = failed;
       error.hidden = false;
     } else {
+      release();
+      release = drew.release;
       summary = next;
       error.hidden = true;
       error.textContent = '';
@@ -181,7 +216,8 @@ export function mdxFlowNodeView(
           const width = view.clientWidth;
           if (!summary.chart || width === 0 || Math.abs(width - drawnAt) < 4) return;
           drawnAt = width;
-          renderMdxSummary(view, summary, width);
+          release();
+          release = renderMdxSummary(view, summary, width, stateFor);
         });
   resized?.observe(view);
   const setOpen = (open: boolean) => {
@@ -268,6 +304,7 @@ export function mdxFlowNodeView(
     destroy() {
       if (pending) clearTimeout(pending);
       resized?.disconnect();
+      release();
       component?.destroy();
     },
   };
