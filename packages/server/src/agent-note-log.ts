@@ -123,6 +123,13 @@ function parseLine(line: string): LoggedAgentNote | undefined {
   };
 }
 
+/** `readBoard`'s answer: the kept lines, and per agent (keyed by
+ *  `normalizeAgent`) how many notes the per-agent cap left out. */
+export interface BoardNotesRead {
+  lines: LoggedAgentNote[];
+  skipped: ReadonlyMap<string, number>;
+}
+
 /**
  * Per-board, append-only storage for notes no row would take.
  *
@@ -188,6 +195,39 @@ export class AgentNoteLog {
     const want = Math.max(0, cap);
     const found = this.tailMatching(workspaceId, (n) => normalizeAgent(n.agent) === who, want);
     return found.sort((a, b) => b.at - a.at);
+  }
+
+  /**
+   * Every agent's lines on this board at or after `since`, newest first —
+   * the read behind Home's "Not on a task" list (`agent-note-placement.ts`).
+   *
+   * The cap is PER AGENT and applied inside the walk, for the reason
+   * `tailMatching` filters inside it: a board-wide cap would let one chatty
+   * agent fill the read and drop a quiet one from the list. Notes past an
+   * agent's cap are counted in `skipped`, not kept. The walk keeps the same
+   * two bounds as every read here. "Newest" for the cut is file order, which
+   * is `at` order except across a clock change.
+   */
+  readBoard(workspaceId: string, since: number, perAgent: number): BoardNotesRead {
+    const cap = Math.max(0, perAgent);
+    const kept = new Map<string, number>();
+    const skipped = new Map<string, number>();
+    const lines = this.tailMatching(
+      workspaceId,
+      (n) => {
+        if (n.at < since) return false;
+        const key = normalizeAgent(n.agent);
+        const mine = kept.get(key) ?? 0;
+        if (mine < cap) {
+          kept.set(key, mine + 1);
+          return true;
+        }
+        skipped.set(key, (skipped.get(key) ?? 0) + 1);
+        return false;
+      },
+      Number.MAX_SAFE_INTEGER,
+    );
+    return { lines: lines.sort((a, b) => b.at - a.at), skipped };
   }
 
   /**
