@@ -448,8 +448,14 @@ describe('no route returns a private message between two other people', () => {
     const found = new Set(hits('alice'));
     expect(found.has('GET /workspaces/:ws/me/dm')).toBe(true);
     expect(found.has('GET /workspaces/:ws/me/events:stream')).toBe(true);
-    // Every place Alice reads them is one of her own two.
-    expect([...found].filter((l) => !l.startsWith('GET /workspaces/:ws/me/'))).toEqual([]);
+    // A share member reads her own conversation with her agent too.
+    expect(found.has('GET /api/me/messages')).toBe(true);
+    // Every place Alice reads them is one of her own three.
+    expect(
+      [...found].filter(
+        (l) => !l.startsWith('GET /workspaces/:ws/me/') && l !== 'GET /api/me/messages',
+      ),
+    ).toEqual([]);
   });
 
   it('writes each message to its own store, and nowhere a member reads', () => {

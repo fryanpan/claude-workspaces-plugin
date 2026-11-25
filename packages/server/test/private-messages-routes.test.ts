@@ -10,13 +10,15 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { emailIdentityId } from '@claude-workspaces/core';
 import { commentQueuePath } from '../src/agent-comment-queue.ts';
 import { agentTokenKey, mintAgentToken } from '../src/auth/agent-token.ts';
 import { mintBoardWidgetToken, widgetTokenKey } from '../src/auth/widget-token.ts';
+import { PersonAgentLinks } from '../src/person-agent-link.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { loadCookieKey } from '../src/share/link-session.ts';
 import { type Frame, listenFrames } from './doc-activity-stall-harness.ts';
-import { startShareProofServer } from './share-proof-harness.ts';
+import { post, readJson, startShareProofServer } from './share-proof-harness.ts';
 import { type SignedInPerson, signedInPerson } from './signed-in-person.ts';
 import { waitFor } from './wait-for.ts';
 import { seedBoard } from './workspace-seed.ts';
@@ -237,22 +239,210 @@ describe('private messages between a person and their own agent', () => {
   });
 });
 
-describe('a share visitor and private messages', () => {
-  it('refuses /api/me/messages to a share visitor, however they proved themselves', async () => {
-    const s = await startShareProofServer('Harborlight private');
-    try {
-      s.handle.shareLinks.addToAudience(s.board, ['alice@harborlight.example'], 'Saltmarsh');
-      expect(await s.join('alice@harborlight.example')).toBe(302);
-      const get = await s.visitor('alice@harborlight.example', '/api/me/messages');
-      expect(get.status).toBeGreaterThanOrEqual(400);
-      const sent = await s.visitor('alice@harborlight.example', '/api/me/messages', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text: 'from the share host' }),
-      });
-      expect(sent.status).toBeGreaterThanOrEqual(400);
-    } finally {
-      await s.stop();
+describe('a share member and private messages', () => {
+  const ALICE = 'alice@harborlight.example';
+  const BOB = 'bob@riverbend.example';
+  const SALTMARSH = 'saltmarsh@harborlight.example';
+  const RIVERBEND = 'riverbend@harborlight.example';
+  const R1 = 'agent-riverbend-r1';
+  const ELSEWHERE = 'agent-saltmarsh-elsewhere';
+  const S1 = 'agent-saltmarsh-s1';
+  const OUTSIDER = 'riverbend@saltmarsh.example';
+  let bobId = '';
+  let s: Awaited<ReturnType<typeof startShareProofServer>>;
+  let base = '';
+  const at1 = (agentId: string) => mintAgentToken(agentId, agentTokenKey(loadCookieKey(s.dataDir)));
+  const pageOf = async (res: Response) => {
+    expect(res.status).toBe(200);
+    return (await res.json()) as {
+      agentId: string;
+      messages: Array<{ from: string; text: string; personId: string }>;
+    };
+  };
+  /** Alice and Bob each name and are confirmed by their own agent, as they
+   *  would from their profile; the link is the person's, whichever host. */
+  async function link(email: string, agentId: string) {
+    const who = signedInPerson(s.handle, s.dataDir, base, { email });
+    const named = await fetch(`${base}/api/auth/profile`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...who.headers },
+      body: JSON.stringify({ leadAgentId: agentId }),
+    });
+    expect(named.status).toBe(200);
+    const confirmed = await fetch(`${base}/api/agents/${agentId}/person`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${at1(agentId)}` },
+      body: JSON.stringify({ personId: who.user.id }),
+    });
+    expect(await confirmed.json()).toMatchObject({ state: 'linked' });
+    return who.user.id;
+  }
+  const reply = (agentId: string, personId: string, text: string) =>
+    fetch(`${base}/api/agents/${agentId}/messages/${encodeURIComponent(personId)}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${at1(agentId)}` },
+      body: JSON.stringify({ text }),
+    });
+
+  beforeAll(async () => {
+    s = await startShareProofServer('Harborlight private');
+    base = `http://127.0.0.1:${s.handle.port}`;
+    s.handle.shareLinks.addToAudience(s.board, [ALICE, BOB, SALTMARSH, RIVERBEND], 'Saltmarsh');
+    for (const email of [ALICE, BOB, SALTMARSH, RIVERBEND]) {
+      expect(await s.join(email)).toBe(302);
     }
+    for (const [agentId, name] of [
+      [A1, 'Harborlight'],
+      [B1, 'Riverbend'],
+      [R1, 'Riverbend One'],
+      [S1, 'Saltmarsh One'],
+    ] as const) {
+      s.handle.tasks.attachAgent(s.board, {
+        agentId,
+        agentName: name,
+        runtime: 'claude-code-local',
+      });
+      s.handle.identities.upsertAgent(agentId, name);
+    }
+    const aliceId = await link(ALICE, A1);
+    bobId = await link(BOB, B1);
+    // An agent on a board none of these members is on.
+    const other = await readJson<{ workspace: { id: string } }>(
+      await s.local('/workspaces', post({ name: 'Saltmarsh elsewhere' })),
+    );
+    s.handle.tasks.attachAgent(other.workspace.id, {
+      agentId: ELSEWHERE,
+      agentName: 'Elsewhere',
+      runtime: 'claude-code-local',
+    });
+    expect((await reply(A1, aliceId, 'Alice, the tide is at six')).status).toBe(200);
+    expect((await reply(B1, bobId, 'Bob, the ferry is late')).status).toBe(200);
+  });
+
+  afterAll(async () => {
+    await s.stop();
+  });
+
+  it('reads the message her own agent sent her from the share host, and never the one sent to Bob', async () => {
+    const alice = await pageOf(await s.visitor(ALICE, '/api/me/messages'));
+    expect(alice.agentId).toBe(A1);
+    expect(alice.messages.map((m) => m.text)).toEqual(['Alice, the tide is at six']);
+    const bob = await pageOf(await s.visitor(BOB, '/api/me/messages'));
+    expect(bob.messages.map((m) => m.text)).toEqual(['Bob, the ferry is late']);
+  });
+
+  it("never reads another member's conversation, whatever the query names", async () => {
+    for (const query of ['', `?personId=${bobId}`, `?agentId=${B1}`, `?with=${bobId}`]) {
+      const alice = await pageOf(await s.visitor(ALICE, `/api/me/messages${query}`));
+      expect(alice.agentId).toBe(A1);
+      expect(alice.messages.some((m) => m.text === 'Bob, the ferry is late')).toBe(false);
+    }
+  });
+
+  it('sends to her own agent from the share host, and the reply names her', async () => {
+    const sent = await s.visitor(ALICE, '/api/me/messages', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: 'Thanks, A1' }),
+    });
+    expect(sent.status).toBe(200);
+    expect(await sent.json()).toMatchObject({ agentId: A1, message: { from: 'person' } });
+    const bob = await pageOf(await s.visitor(BOB, '/api/me/messages'));
+    expect(bob.messages.some((m) => m.text === 'Thanks, A1')).toBe(false);
+  });
+
+  it('still refuses a share visitor carrying a token, and names a missing lead agent', async () => {
+    const tokened = await s.visitor(ALICE, '/api/me/messages', {
+      headers: { authorization: `Bearer ${at1(A1)}` },
+    });
+    expect(tokened.status).toBe(403);
+    const unlinked = await s.visitor(SALTMARSH, '/api/me/messages');
+    expect(unlinked.status).toBe(409);
+    expect(await unlinked.json()).toMatchObject({ error: 'no_lead_agent' });
+  });
+
+  const profile = (email: string, body: unknown) =>
+    s.visitor(email, '/api/auth/profile', post(body));
+  /** What a person named, read off the store's file: never a write. */
+  const namedBy = (email: string) =>
+    new PersonAgentLinks(s.dataDir, s.handle.identities).sidesOf(emailIdentityId(email)).named;
+  const queued = () => s.handle.tasks.listQueuedComments(s.board).length;
+
+  it('names a lead agent on their own board from the share host, then messages it', async () => {
+    const named = await profile(RIVERBEND, { leadAgentId: R1 });
+    expect(named.status).toBe(200);
+    const riverbendId = emailIdentityId(RIVERBEND);
+    const confirmed = await fetch(`${base}/api/agents/${R1}/person`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${at1(R1)}` },
+      body: JSON.stringify({ personId: riverbendId }),
+    });
+    expect(await confirmed.json()).toMatchObject({ state: 'linked' });
+    const sent = await s.visitor(RIVERBEND, '/api/me/messages', post({ text: 'Hello, R1' }));
+    expect(sent.status).toBe(200);
+    expect(await sent.json()).toMatchObject({ agentId: R1 });
+  });
+
+  it('refuses, and changes nothing, an agent on another board, a write naming somebody else, or a name change', async () => {
+    const before = s.handle.identities.get(emailIdentityId(ALICE))?.displayName;
+    const refusals: Array<[unknown, number, string]> = [
+      [{ leadAgentId: ELSEWHERE }, 403, 'agent_not_on_your_board'],
+      [{ leadAgentId: B1, personId: bobId }, 403, 'share_member_lead_agent_only'],
+      [{ leadAgentId: B1 }, 409, 'agent_claimed'],
+      [{ leadAgentId: A1, displayName: 'Bob' }, 403, 'share_member_lead_agent_only'],
+      [{ displayName: 'Bob' }, 403, 'share_member_lead_agent_only'],
+    ];
+    for (const [body, status, error] of refusals) {
+      const res = await profile(ALICE, body);
+      expect(res.status, JSON.stringify(body)).toBe(status);
+      expect(await res.json()).toMatchObject({ error });
+    }
+    expect(s.handle.identities.get(emailIdentityId(ALICE))?.displayName).toBe(before);
+    expect(namedBy(ALICE)).toBe(A1);
+    expect(namedBy(BOB)).toBe(B1);
+    const alice = await pageOf(await s.visitor(ALICE, '/api/me/messages'));
+    expect(alice.agentId).toBe(A1);
+  });
+
+  it('gives an address that is a member of no board no conversation and no agent', async () => {
+    const read = await s.visitor(OUTSIDER, '/api/me/messages');
+    expect(read.status).toBe(409);
+    for (const agentId of [A1, ELSEWHERE]) {
+      const res = await profile(OUTSIDER, { leadAgentId: agentId });
+      expect(await res.json()).toMatchObject({ error: 'agent_not_on_your_board' });
+    }
+    expect(namedBy(OUTSIDER)).toBeNull();
+  });
+
+  it("ends a member's conversation while their board is locked, and gives it back after", async () => {
+    const sendAsAlice = () => s.visitor(ALICE, '/api/me/messages', post({ text: 'While locked' }));
+    expect(s.handle.sharingGate.setBoardLocked(s.board, true)).toMatchObject({ ok: true });
+    try {
+      const rows = queued();
+      expect((await s.visitor(ALICE, '/api/me/messages')).status).toBe(403);
+      expect((await sendAsAlice()).status).toBe(403);
+      expect(queued()).toBe(rows);
+      const renamed = await profile(RIVERBEND, { leadAgentId: R1 });
+      expect(await renamed.json()).toMatchObject({ error: 'agent_not_on_your_board' });
+    } finally {
+      s.handle.sharingGate.setBoardLocked(s.board, false);
+    }
+    const alice = await pageOf(await s.visitor(ALICE, '/api/me/messages'));
+    expect(alice.messages.some((m) => m.text === 'While locked')).toBe(false);
+  });
+
+  it("ends a removed member's conversation with the agent they had linked", async () => {
+    const saltmarshId = await link(SALTMARSH, S1);
+    expect((await s.visitor(SALTMARSH, '/api/me/messages')).status).toBe(200);
+    expect(s.handle.shareLinks.removeMember(s.board, SALTMARSH)).toBe(true);
+    s.handle.shareLinks.removeFromAudience(s.board, SALTMARSH);
+    const rows = queued();
+    expect((await s.visitor(SALTMARSH, '/api/me/messages')).status).toBe(403);
+    const sent = await s.visitor(SALTMARSH, '/api/me/messages', post({ text: 'After removal' }));
+    expect(sent.status).toBe(403);
+    expect(queued()).toBe(rows);
+    const renamed = await profile(SALTMARSH, { leadAgentId: S1 });
+    expect(await renamed.json()).toMatchObject({ error: 'agent_not_on_your_board' });
+    expect(new PersonAgentLinks(s.dataDir, s.handle.identities).leadAgentOf(saltmarshId)).toBe(S1);
   });
 });

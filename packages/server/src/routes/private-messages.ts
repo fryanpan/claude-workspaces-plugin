@@ -6,7 +6,9 @@
  *   `provenIdentityFor`), and the agent is always that person's linked lead
  *   agent (`person-agent-link.ts`), never a body or query field. A request
  *   carrying any `Authorization` header is refused, which covers the widget
- *   token and both agent tokens, and so is every share visitor.
+ *   token and both agent tokens. A share member reaches it on the share host
+ *   with the proof that admitted them: the path names nobody, so the only
+ *   conversation it can open is the proven person's own.
  * - `POST /api/agents/<id>/messages/<personId>`: the agent's reply. Behind the
  *   agent's own `at1` (loopback, not a browser, no cf-ray) or an `at2` whose
  *   agent is `<id>`, and refused unless `<personId>` is the person linked to
@@ -42,6 +44,9 @@ export interface PrivateMessageRoutesContext {
   /** The board whose stream an agent's private messages ride, or null when
    *  it is attached nowhere. */
   boardForAgent: (agentId: string) => string | null;
+  /** Is this agent attached to an open board that admits this member? A
+   *  share member's conversation ends with their membership or a lock. */
+  memberReachesAgent: (email: string | undefined, agentId: string) => boolean;
   requestAddress: (req: Request) => string | undefined;
   agentTokenKey: () => string;
   j: (status: number, body: unknown) => Response;
@@ -82,7 +87,7 @@ async function personSide(
 ): Promise<Response> {
   const { j } = ctx;
   const { req } = rq;
-  if (rq.visitor || rq.boardAgent) return j(403, { error: 'person_proof_required' });
+  if (rq.boardAgent) return j(403, { error: 'person_proof_required' });
   if (req.headers.has('authorization')) return j(403, { error: 'person_proof_required' });
   const person = rq.provenIdentityFor();
   if (!person || person.kind !== 'person') return j(401, { error: 'not_signed_in' });
@@ -92,6 +97,9 @@ async function personSide(
       error: 'no_lead_agent',
       message: 'Name your lead agent in your profile, and have it confirm you, first.',
     });
+  }
+  if (rq.visitor && !ctx.memberReachesAgent(person.email, agentId)) {
+    return j(403, { error: 'out_of_share_scope' });
   }
   if (verb === 'read') {
     const url = new URL(req.url);

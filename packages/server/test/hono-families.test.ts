@@ -116,10 +116,11 @@ describe('honoFamilies', () => {
     expect(
       (await front(at('/landing/events:stream', { method: 'POST' }), envFor(false)))?.status,
     ).toBe(405);
-    // routes/private-messages.ts wants a person, never a share visitor.
+    // routes/private-messages.ts wants a proven person: a share visitor
+    // reaches it, and one who proved nobody is told to sign in.
     const mine = await front(at('/api/me/messages'), envFor(true));
-    expect(mine?.status).toBe(403);
-    expect(await mine?.json()).toEqual({ error: 'person_proof_required' });
+    expect(mine?.status).toBe(401);
+    expect(await mine?.json()).toEqual({ error: 'not_signed_in' });
     // routes/agent-identity.ts refuses a share visitor its stream bearer.
     expect((await front(at('/api/agents/a-1/token'), envFor(true)))?.status).toBe(403);
   });

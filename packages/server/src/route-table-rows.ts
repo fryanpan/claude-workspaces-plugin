@@ -143,7 +143,12 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['share-scope', '/api/auth/session', 'GET'],
     ['trusted-local', '/api/auth/logout', 'POST'],
     ['trusted-local', '/api/auth/reauth', 'GET'],
-    ['trusted-local', '/api/auth/profile', 'POST'],
+    [
+      'share-scope',
+      '/api/auth/profile',
+      'POST',
+      'A share member may only name their own lead agent, one attached to a board their membership admits; any other field is refused whole (`routes/person-profile.ts`).',
+    ],
     ['trusted-local', '/api/share', 'GET'],
     ['trusted-local', '/api/share/enabled', 'POST'],
     ['trusted-local', '/api/share/doc', 'POST'],
@@ -278,7 +283,12 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
   // side needs a person proof and refuses every token; the agent's reply is
   // its own `at1` or `at2`, and only to the person linked to it.
   ...family('routes/private-messages.ts', [
-    ['trusted-local', '/api/me/messages', 'GET POST'],
+    [
+      'share-scope',
+      '/api/me/messages',
+      'GET POST',
+      "A share member reaches their own conversation: the path names no one, and whose it is comes from the request's person proof alone (`routes/private-messages.ts`).",
+    ],
     [
       'loopback-only',
       '/api/agents/:agentId/messages/:personId',

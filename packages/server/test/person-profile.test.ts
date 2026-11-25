@@ -47,15 +47,26 @@ describe('handleProfile, given the identity a proof named', () => {
     identities = new Identities({ dataDir });
     alice = identities.upsertByEmail('alice@example.com');
     bob = identities.upsertByEmail('bob@example.com');
+    identities.upsertAgent('agent-a1', 'Harborlight');
   });
   afterAll(() => rmSync(dataDir, { recursive: true, force: true }));
 
-  const call = (body: unknown, proven: IdentityRecord | null, headers: HeadersInit = {}) =>
+  // Alice reaches agent-a1, on an open board she is a member of; nobody
+  // else reaches any agent.
+  const memberReachesAgent = (email: string | undefined, agentId: string) =>
+    email === 'alice@example.com' && agentId === 'agent-a1';
+  const call = (
+    body: unknown,
+    proven: IdentityRecord | null,
+    headers: HeadersInit = {},
+    shareMember = false,
+  ) =>
     handleProfile(
       {
         identities,
         personAgentLinks: new PersonAgentLinks(dataDir, identities),
         onPersonRenamed: (id, name) => void renamed.push([id, name]),
+        memberReachesAgent,
         j,
         safeJson,
       },
@@ -65,7 +76,32 @@ describe('handleProfile, given the identity a proof named', () => {
         body: JSON.stringify(body),
       }),
       () => proven,
+      shareMember,
     );
+
+  it('lets a share member name an agent on their own board, and nothing else', async () => {
+    // A fresh reader each time: the store reads its file once, at construction.
+    const named = (id: string) => new PersonAgentLinks(dataDir, identities).sidesOf(id).named;
+    expect((await call({ leadAgentId: ' agent-a1 ' }, alice, {}, true)).status).toBe(200);
+    const refusals: Array<[unknown, string]> = [
+      [{ leadAgentId: 'agent-elsewhere' }, 'agent_not_on_your_board'],
+      [{ leadAgentId: 'agent-a1', displayName: 'Saltmarsh' }, 'share_member_lead_agent_only'],
+      [{ displayName: 'Saltmarsh' }, 'share_member_lead_agent_only'],
+      [{ leadAgentId: 5 }, 'invalid_lead_agent'],
+      [{ leadAgentId: '  ' }, 'invalid_lead_agent'],
+    ];
+    for (const [body, error] of refusals) {
+      const res = await call(body, alice, {}, true);
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({ error });
+    }
+    expect(identities.get(alice.id)?.displayName).not.toBe('Saltmarsh');
+    expect(named(alice.id)).toBe('agent-a1');
+    // Bob reaches no agent, so agent-a1 is not his to name.
+    const bobs = await call({ leadAgentId: 'agent-a1' }, bob, {}, true);
+    expect(await bobs.json()).toEqual({ error: 'agent_not_on_your_board' });
+    expect(named(bob.id)).toBeNull();
+  });
 
   it('renames the person an Access assertion proved, whatever id the body names', async () => {
     const res = await call({ displayName: 'Riverbend', id: bob.id, personId: bob.id }, alice);

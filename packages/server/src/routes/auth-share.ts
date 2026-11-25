@@ -15,6 +15,7 @@ import type { DocStore } from '../doc-store.ts';
 import type { Identities, IdentityRecord } from '../identities.ts';
 import { userForIdentity } from '../identities.ts';
 import { type OriginPolicy, isAllowedBrowserOrigin } from '../middleware/browser-origin.ts';
+import type { ShareTarget } from '../middleware/host-guard.ts';
 import { isWidgetDoorOrigin } from '../middleware/widget-door.ts';
 import { browserCannotOperateBody, isBrowserRequest } from '../middleware/write-gate.ts';
 import type { PersonAgentLinks } from '../person-agent-link.ts';
@@ -156,6 +157,9 @@ export interface AuthShareRoutesContext {
    * a member" at the place that decides who gets in.
    */
   shareLinks: ShareLinks;
+  /** Is this agent attached to an open board that admits this member? The
+   *  profile route asks it before a share member names a lead agent. */
+  memberReachesAgent: (email: string | undefined, agentId: string) => boolean;
   /** Files the proposal an agent's widening share call becomes. */
   accessProposals: AccessProposals;
   /**
@@ -256,6 +260,8 @@ export interface AuthShareRouteRequest {
   provenIdentityFor: () => IdentityRecord | null;
   /** The identity Cloudflare Access proved, never a session cookie's. */
   accessIdentityFor: () => IdentityRecord | null;
+  /** Set when a share visitor sent this: the profile route narrows to them. */
+  visitor?: ShareTarget | null;
 }
 
 /**
@@ -604,7 +610,7 @@ export async function handleAuthShareRoutes(
   }
 
   if (pathname === '/api/auth/profile' && req.method === 'POST') {
-    return handleProfile(ctx, req, provenIdentityFor);
+    return handleProfile(ctx, req, provenIdentityFor, rq.visitor != null);
   }
 
   // --- REST: shares ---
