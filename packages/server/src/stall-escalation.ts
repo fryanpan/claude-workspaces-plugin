@@ -57,6 +57,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { dirname, join } from 'node:path';
 import { type TaskReviewItem, isReviewItemOpen, reviewWithdrawn } from '@claude-workspaces/core';
 import { taskDeepLink } from './home-brief.ts';
+import type { HomeFeedEscalation } from './home-feed.ts';
 import { STALL_EVENT, type StallNudgeFrame, type StallSnapshot } from './stall-nudge.ts';
 import type { TaskStore } from './tasks.ts';
 
@@ -204,6 +205,10 @@ interface Dead {
    *  answered or withdrew. Those are not asked about again; a row they were
    *  not shown is. */
   seenRowIds?: string[];
+  /** How many rows were stuck on the latest tick, and who holds the seat:
+   *  what the board's home feed tells a Home on another machine. */
+  stuck?: number;
+  lead?: string;
 }
 
 type Sidecar = Record<string, { dead: Dead }>;
@@ -291,6 +296,8 @@ export class StallEscalations {
     }
 
     const dead: Dead = prior ?? { since: now };
+    dead.stuck = rows.length;
+    dead.lead = board.leadAgentId;
     // Team Lead first, once per window while the board stays dead — and
     // whether or not the reader already holds an item: Team Lead is the one
     // who can restart the lead, and the item withdraws itself when that
@@ -332,6 +339,15 @@ export class StallEscalations {
 
   /** How many boards hold a live item. Test surface for the pruning that a
    *  recovered board does — a sidecar that only grows is invisible otherwise. */
+  /** The board's escalation as the home feed carries it, while the board is
+   *  dead with something stuck; undefined otherwise. A Home on another
+   *  machine reads it to tell ITS Team Lead (`remote-escalations.ts`). */
+  deadBoard(workspaceId: string): HomeFeedEscalation | undefined {
+    const dead = this.sidecar[workspaceId]?.dead;
+    if (!dead || !dead.stuck) return undefined;
+    return { deadSince: dead.since, stuck: dead.stuck, ...(dead.lead ? { lead: dead.lead } : {}) };
+  }
+
   filedCount(): number {
     return Object.values(this.sidecar).filter((r) => r.dead.filed !== undefined).length;
   }

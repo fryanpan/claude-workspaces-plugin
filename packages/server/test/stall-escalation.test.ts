@@ -197,6 +197,19 @@ describe('a dead board escalates; a live one never does', () => {
       expect(sent).toHaveLength(0);
     });
 
+    it('says what it holds for a dead board, for the home feed, and nothing once it is alive', () => {
+      const a = make('Split the parser out of the loader');
+      const b = make('Retire the old loader');
+      const escalations = build({ withTeamLead: false });
+      const rows = { stalled: [row(a, 'in-progress'), row(b, 'in-progress')] };
+      expect(escalations.deadBoard(wsId)).toBeUndefined();
+      escalations.onBoard(board(wsId, rows), now);
+      escalations.onBoard(board(wsId, rows), now + 60_000);
+      expect(escalations.deadBoard(wsId)).toEqual({ deadSince: now, stuck: 2, lead: AGENT.id });
+      escalations.onBoard(board(wsId, { ...rows, sessionLive: true }), now + 120_000);
+      expect(escalations.deadBoard(wsId)).toBeUndefined();
+    });
+
     it('a dead board whose ONLY finding is an unanswered doc question reaches nobody', () => {
       // The finding goes to the board's LEAD and stops there. Bryan is the
       // one WAITING on that thread; filing it onto his queue would tell him

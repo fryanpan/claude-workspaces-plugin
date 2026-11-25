@@ -49,6 +49,8 @@ import { BOARD_FEEDBACK_DOC_ID } from './doc-ids.ts';
 import type { DocStore, ThreadsAhead } from './doc-store.ts';
 import { changedFilesInWorktree, changedFilesInWorktreeAsync } from './git-diff.ts';
 import { taskDeepLink } from './home-brief.ts';
+import type { HomeFeedEscalation } from './home-feed.ts';
+import type { RemoteBoardView } from './home-remotes.ts';
 import { KEEP_MOVING_VERDICTS_FILENAME, KeepMovingRecorder } from './keep-moving-verdict.ts';
 import type { ReviewItemRow } from './keep-moving.ts';
 import { createLeadPresenceMonitor } from './lead-presence.ts';
@@ -60,6 +62,7 @@ import {
   type ReadyWorkSnapshot,
   isBoardActivity,
 } from './ready-nudge.ts';
+import { RemoteEscalations } from './remote-escalations.ts';
 import { REVIEW_GATE_RELEASE_MS, type ReviewGateAddress } from './review-gate.ts';
 import {
   DONE_WHEN_READY_TOLD_FILENAME,
@@ -242,6 +245,13 @@ export interface StallWiringContext {
   spawnerAgentId?: string;
   /** How often each board's keep-moving verdict is recorded (ms). */
   keepMovingCadenceMs?: number;
+  /** Boards other servers hold, as their home feeds last said, and which
+   *  origin holds each: a dead one there is told to Team Lead here
+   *  (`remote-escalations.ts`). Absent → this server pulls no feeds. */
+  remoteBoards?: {
+    views: () => readonly RemoteBoardView[];
+    originOf: (boardId: string) => string | undefined;
+  };
 }
 
 /** What `createServer` keeps a handle on. The two snapshots and
@@ -265,6 +275,8 @@ export interface StallWiring {
    *  stopping first would arm one timer per connected agent on the way out
    *  and leave them to outlive the bus they would broadcast on. */
   stopListeningAnnouncer: () => void;
+  /** A board's escalation while nobody is on it, for its home feed. */
+  deadBoard: (workspaceId: string) => HomeFeedEscalation | undefined;
 }
 
 export function createStallWiring(ctx: StallWiringContext): StallWiring {
@@ -1278,6 +1290,17 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
           send: (workspaceId, agentId, frame) =>
             sse.sendToAgent(`ws~${workspaceId}`, agentId, { ...frame }),
         };
+  const remoteEscalations =
+    teamLeadReach !== undefined && ctx.remoteBoards !== undefined
+      ? new RemoteEscalations({
+          teamLead: {
+            ...teamLeadReach,
+            send: (workspaceId, agentId, frame) =>
+              sse.sendToAgent(`ws~${workspaceId}`, agentId, { ...frame }),
+          },
+          originOf: ctx.remoteBoards.originOf,
+        })
+      : undefined;
   const escalations = new StallEscalations({
     store: taskStore,
     dataDir,
@@ -1433,7 +1456,14 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     // row falls due and nothing at all about how often the lead hears.
     ...(ctx.checkInMs !== undefined ? { checkInRepeatMs: ctx.checkInMs } : {}),
     escalate: (board, now) => escalations.onBoard(board, now),
-    escalateFleet: (boards, now) => waitingUnfiled.onTick(boards, now),
+    escalateFleet: (boards, now) => {
+      waitingUnfiled.onTick(boards, now);
+      // Boards on other servers, on the same clock: Team Lead holds no
+      // stream there, so their own escalation cannot reach it.
+      if (remoteEscalations && ctx.remoteBoards) {
+        remoteEscalations.observe(ctx.remoteBoards.views(), now);
+      }
+    },
     // Prod restarts at every merge; without this each deploy would re-fire one
     // wake per board over rows their leads had already been told about.
     stampFile: join(dataDir, STALL_NUDGE_STAMP_FILENAME),
@@ -1766,5 +1796,6 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     onLiveDocEvent,
     keepMoving,
     stopListeningAnnouncer: () => listeningAnnouncer.stop(),
+    deadBoard: (workspaceId) => escalations.deadBoard(workspaceId),
   };
 }
