@@ -18,6 +18,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { positiveEnvDuration, readRenamedEnv } from '@claude-workspaces/core/env-names';
 import { passwordSignInFromEnv } from './auth/board-signin-password.ts';
+import { testSignInFromEnv } from './auth/test-signin.ts';
 import { boardSocketDirError, defaultBoardSocketDir } from './board-sockets.ts';
 import { clientReleaseStatus, resolveClientDists } from './client-release.ts';
 import { MISSING_DATA_DIR, dataDirFromArgs } from './data-dir.ts';
@@ -437,6 +438,15 @@ export function resolveServerConfig(opts: {
     console.error(`[feedback] CW_SIGNIN refused: ${signInResolved.error}.`);
     process.exit(1);
   }
+  // The local test sign-in (`CW_TEST_SIGNIN`, auth/test-signin.ts): Alice and
+  // Bob through a fake Google, for a staging server. FATAL when asked for
+  // anywhere it must not run — prod's port, a wide bind, a real Google client.
+  const testSignInResolved = testSignInFromEnv(env, { port: requestedPort, bindHost: hostname });
+  if ('error' in testSignInResolved) {
+    console.error(`[feedback] ${testSignInResolved.error}.`);
+    process.exit(1);
+  }
+  const testSignIn = testSignInResolved.setting;
   // Email and password beside Google: all four of its settings or none.
   const passwordResolved = passwordSignInFromEnv(env);
   if ('error' in passwordResolved) {
@@ -769,6 +779,7 @@ export function resolveServerConfig(opts: {
     trustedHosts,
     cfAccess,
     signIn,
+    testSignIn,
     accessTunnelHosts,
     accessTunnelReady,
     proxiedTrustedHosts,

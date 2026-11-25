@@ -700,6 +700,8 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
         // product with no identity at all.
         accessOnly: accessOnlyBrowserHosts,
         loopbackPeer: isLoopbackAddress(requestAddress(req)),
+        // The local test sign-in's `*.localhost` address, when it runs.
+        localSignInHosts: signInDoor?.localHost ? [signInDoor.localHost] : [],
         lookupShare: (h) => {
           // LIVE, not merely known: an expired share's hostname must stop
           // being a share hostname, or expiry never takes effect for

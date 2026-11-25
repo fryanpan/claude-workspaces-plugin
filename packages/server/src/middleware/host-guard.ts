@@ -251,6 +251,14 @@ export interface TrustedHostOpts {
    * typing the tailnet name must not reach it.
    */
   widgetDoorHosts?: readonly string[];
+  /**
+   * The local test sign-in's address (`auth/test-signin.ts`), a `*.localhost`
+   * name. Classifies `proxied-local` — a session, then everything loopback
+   * gets — only off the Cloudflare edge AND from a loopback peer, the reverse
+   * of the operator's proxied list: a browser on this machine resolves the
+   * name to loopback by itself, and nothing else should reach it.
+   */
+  localSignInHosts?: readonly string[];
 }
 
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '::1', '0.0.0.0']);
@@ -441,6 +449,17 @@ export function isRecallCallbackHost(
 }
 
 /**
+ * Is this Host the local test sign-in's address, reached from this machine
+ * and not through the edge? See `localSignInHosts`.
+ */
+export function isLocalSignInHost(host: string | null | undefined, opts: TrustedHostOpts): boolean {
+  if (opts.viaProxy || opts.loopbackPeer !== true) return false;
+  const h = normalizeHost(host);
+  if (h === '') return false;
+  return (opts.localSignInHosts ?? []).map((c) => normalizeHost(c)).includes(h);
+}
+
+/**
  * Is this Host one of the tailnet widget door's names, reached directly
  * rather than through the Cloudflare edge?
  *
@@ -543,6 +562,7 @@ export function classifyHost(
   if (isShareLinkHost(host, opts)) return { kind: 'share-link' };
   if (isAccessTunnelHost(host, opts)) return { kind: 'collab' };
   if (isProxiedTrustedHost(host, opts)) return { kind: 'proxied-local' };
+  if (isLocalSignInHost(host, opts)) return { kind: 'proxied-local' };
   return { kind: 'deny', reason: 'unknown_host' };
 }
 

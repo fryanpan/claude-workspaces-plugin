@@ -2,7 +2,13 @@
  * Run an unmerged branch as a second claude-workspaces instance, so peers and
  * people can review a build BEFORE it lands on main.
  *
- *   bun run staging [--port 8788|8789|8790] [--data-dir <path>] [--host <addr>]
+ *   bun run staging [--port 8788|8789|8790] [--data-dir <path>] [--host <addr>] [--test-signin]
+ *
+ * `--test-signin` sets `CW_TEST_SIGNIN=1`: sign in as Alice (the owner) or Bob
+ * at `http://signin.localhost:<port>` through a fake Google that runs in the
+ * server, with no Google account and no secret. It refuses prod's port, a
+ * bind wider than loopback, a configured Google client, and any request
+ * through Cloudflare (`packages/server/src/auth/test-signin.ts`).
  *
  * Prod keeps running on 8787 with its own data the whole time. Nothing about
  * this touches it — which takes three specific guardrails, all of which are
@@ -147,12 +153,19 @@ function main(): void {
     ].join('\n'),
   );
 
+  const testSignIn = args.includes('--test-signin');
+  if (testSignIn) {
+    console.log(
+      `[staging] test sign-in: open http://signin.localhost:${port}/ and choose Alice or Bob\n`,
+    );
+  }
   const server = spawn(
     'bun',
     ['run', bin, '--port', String(port), '--data-dir', dataDir, '--host', host],
     {
       cwd: repoRoot,
       stdio: 'inherit',
+      env: testSignIn ? { ...process.env, CW_TEST_SIGNIN: '1' } : process.env,
     },
   );
   server.on('exit', (code) => process.exit(code ?? 0));

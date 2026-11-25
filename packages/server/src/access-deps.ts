@@ -53,7 +53,14 @@ export interface AccessDepsOptions {
   recallCallbackHost?: string;
   /** `CW_SIGNIN` and what Better Auth needs (`middleware/signin-door.ts`).
    *  Absent is `access`: today's Cloudflare Access sign-in, unchanged. */
-  signIn?: { mode: SignInMode; origin: string; google: GoogleClient; password?: PasswordSignIn };
+  signIn?: {
+    mode: SignInMode;
+    origin: string;
+    google: GoogleClient;
+    password?: PasswordSignIn;
+    localOnly?: boolean;
+    extraAccounts?: readonly string[];
+  };
 }
 
 export interface AccessDepsContext {
@@ -247,7 +254,10 @@ export function createAccessDeps(ctx: AccessDepsContext) {
           origin: opts.signIn.origin,
           google: opts.signIn.google,
           ...(opts.signIn.password ? { password: opts.signIn.password } : {}),
-          mayHaveAccount: (email, verified) => ctx.mayHaveAccount?.(email, verified) ?? false,
+          ...(opts.signIn.localOnly ? { localOnly: true } : {}),
+          mayHaveAccount: (email, verified) =>
+            (verified && (opts.signIn?.extraAccounts ?? []).includes(email)) ||
+            (ctx.mayHaveAccount?.(email, verified) ?? false),
           onSessionCreated: (p) => recordOwner(p.email, p.emailVerified),
         })
       : null;
@@ -275,8 +285,11 @@ export function createAccessDeps(ctx: AccessDepsContext) {
    * is named as the operator; bin.ts also refuses at boot, but this check is
    * the one in the request path.
    */
+  // The local test sign-in's address is not on the list (it must not
+  // classify through the edge), but it is verified the same way.
   const proxiedTrustedVerifier =
-    (opts.proxiedTrustedHosts ?? []).length > 0 && proxiedTrustedEmails.size > 0
+    ((opts.proxiedTrustedHosts ?? []).length > 0 || signInDoor.localHost !== null) &&
+    proxiedTrustedEmails.size > 0
       ? staticAccessVerifier
       : null;
   // The list as the gate and the origin policy see it: EMPTY unless everything
