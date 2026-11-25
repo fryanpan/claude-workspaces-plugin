@@ -1295,6 +1295,15 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     ...(opts.keepMovingCadenceMs !== undefined
       ? { keepMovingCadenceMs: opts.keepMovingCadenceMs }
       : {}),
+    // A dead board on another server reaches Team Lead here off its feed.
+    ...(homeRemotes && opts.homeRemotes
+      ? {
+          remoteBoards: {
+            views: () => homeRemotes.boards(),
+            originOf: (id: string) => opts.homeRemotes?.config.table.get(id),
+          },
+        }
+      : {}),
   });
   const { leadPresence, readyNudger, stallNudger } = stallWiring;
 
@@ -2484,7 +2493,12 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     boardName: (id) => taskStore.getWorkspace(id)?.name,
     feed: async (id) => {
       const { items } = await crossReview.queue();
-      return homeFeedOf(id, taskStore.getWorkspace(id)?.name ?? id, items);
+      return homeFeedOf(
+        id,
+        taskStore.getWorkspace(id)?.name ?? id,
+        items,
+        stallWiring.deadBoard(id),
+      );
     },
     verifier: staticAccessVerifier,
     clientId: opts.homeFeedClientId,

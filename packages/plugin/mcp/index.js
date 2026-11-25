@@ -13669,7 +13669,7 @@ class StdioServerTransport {
   }
 }
 // packages/plugin/.claude-plugin/plugin.json
-var version2 = "0.1.389";
+var version2 = "0.1.390";
 
 // packages/plugin/hooks/lib/access-headers.ts
 import { spawnSync } from "node:child_process";
@@ -15041,6 +15041,16 @@ function capClause(cap, now2, style) {
   return style === "ready" ? ` (cap ${cap.value}${setter})` : ` of ${cap.value}${setter ? `${setter.replace(/, was (\d+)$/, " (was $1)")},` : ""}`;
 }
 var NOTE_INFERRED_UNFILED = "waiting-unfiled";
+function remoteStalledLine(p, frameBoard) {
+  const r = p.remote ?? {};
+  const seat = p.escalatedFrom ? `Its lead ${p.escalatedFrom}` : "Its lead";
+  const board = frameBoard ? `board ${frameBoard}` : "a board";
+  const where = r.origin ? ` on another server (${r.origin})` : " on another server";
+  const n = r.stuck ?? 0;
+  const stuck = n === 1 ? "1 task is stuck" : `${n} tasks are stuck`;
+  const age = r.deadSince !== undefined && p.ts !== undefined && p.ts >= r.deadSince ? ` for over ${humanDuration2(p.ts - r.deadSince)}` : "";
+  return `[workspace.stalled] Nobody is on ${board}${where}, and ${stuck}. ${seat} has not been ` + `reachable there${age}, and this server cannot reach that board, so attaching here will ` + "not help: restart that lead on its own machine. The board withdraws its item on the " + "owner's queue once a session is back on it.";
+}
 function truncate4(s, n) {
   return s.length > n ? `${s.slice(0, n - 1)}…` : s;
 }
@@ -15203,6 +15213,7 @@ var STALL_PAYLOAD_KEYS = {
   changed: true,
   escalatedFrom: true,
   unfiledCarry: true,
+  remote: true,
   ts: true
 };
 var STALL_ENVELOPE_KEYS = [
@@ -15248,6 +15259,8 @@ function unfiledCarryLine(carry) {
   return "You were woken as Team Lead, not as this board’s lead: every row below has stood on its own " + `board’s unfiled list ${age} with nothing filed. ` + `${seats} to file the ask with add_review_item, or file it yourself.`;
 }
 function stalledLine(p, frameBoard) {
+  if (typeof p.remote === "object" && p.remote !== null)
+    return remoteStalledLine(p, frameBoard);
   const parts = [];
   const rows = p.rows ?? [];
   const count = p.stalledCount ?? rows.length;
