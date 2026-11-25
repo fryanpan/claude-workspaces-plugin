@@ -216,12 +216,21 @@ describe('a dead board on another server reaches Team Lead on the Mac', () => {
     expect(teamLead.list.filter((f) => f.event === STALL_EVENT)).toHaveLength(1);
   });
 
-  it('the feed stops carrying it once the lead is back', async () => {
+  it('the feed stops carrying it once the lead is back, with no item left to withdraw', async () => {
+    // The owner takes the item back, so the lead's return withdraws nothing.
+    // That the board then tells Home its feed moved is pinned in
+    // stall-escalation.test.ts: here the lead's own stall wake also lands on
+    // Home, so a frame on this stream could not tell the two apart.
+    for (const item of cloud.tasks.listReviewItems(taskId)) {
+      if (item.review.withdrawnAt === undefined) {
+        expect(cloud.tasks.withdrawReviewItem(taskId, item.id, { actor: PERSON }).ok).toBe(true);
+      }
+    }
+    expect((await cloudFeed()).escalation).toBeDefined();
     await stream(cloud, board, LEAD.id);
     await waitFor(async () => {
       cloud.nudgeStalls();
       return (await cloudFeed()).escalation === undefined;
     });
-    expect(cloud.tasks.listReviewItems(taskId)[0]?.review.withdrawnAt).toBeDefined();
   });
 });

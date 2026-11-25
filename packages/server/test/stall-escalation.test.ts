@@ -113,12 +113,13 @@ describe('a dead board escalates; a live one never does', () => {
       return 1;
     },
   });
-  const build = (opts: { withTeamLead?: boolean } = {}) =>
+  const build = (opts: { withTeamLead?: boolean; onDeadBoardChange?: (ws: string) => void } = {}) =>
     new StallEscalations({
       store,
       dataDir,
       escalateMs: ESCALATE_MS,
       report: () => {},
+      ...(opts.onDeadBoardChange ? { onDeadBoardChange: opts.onDeadBoardChange } : {}),
       ...(opts.withTeamLead === false ? {} : { teamLead: teamLead() }),
     });
 
@@ -207,6 +208,36 @@ describe('a dead board escalates; a live one never does', () => {
       escalations.onBoard(board(wsId, rows), now + 60_000);
       expect(escalations.deadBoard(wsId)).toEqual({ deadSince: now, stuck: 2, lead: AGENT.id });
       escalations.onBoard(board(wsId, { ...rows, sessionLive: true }), now + 120_000);
+      expect(escalations.deadBoard(wsId)).toBeUndefined();
+    });
+
+    it('reports nothing for the feed once Team Lead here has been told', () => {
+      const a = make('Split the parser out of the loader');
+      reachOn.add(wsId);
+      const escalations = build();
+      escalations.onBoard(board(wsId, { stalled: [row(a, 'in-progress')] }), now);
+      expect(sent).toHaveLength(1);
+      expect(escalations.deadBoard(wsId)).toBeUndefined();
+    });
+
+    it('tells Home the feed moved when the board dies, and when it recovers with no item to withdraw', () => {
+      const a = make('Split the parser out of the loader');
+      const changed: string[] = [];
+      const escalations = build({
+        withTeamLead: false,
+        onDeadBoardChange: (ws) => changed.push(ws),
+      });
+      const rows = { stalled: [row(a, 'in-progress')] };
+      escalations.onBoard(board(wsId, rows), now);
+      escalations.onBoard(board(wsId, rows), now + 60_000);
+      expect(changed).toEqual([wsId]);
+      // The owner takes the item back: the board recovers with nothing open
+      // to withdraw, which is the case no queue change would announce.
+      const item = items(a.id)[0];
+      if (!item) throw new Error('no item filed');
+      expect(store.withdrawReviewItem(a.id, item.id, { actor: PERSON }).ok).toBe(true);
+      escalations.onBoard(board(wsId, { ...rows, sessionLive: true }), now + 120_000);
+      expect(changed).toEqual([wsId, wsId]);
       expect(escalations.deadBoard(wsId)).toBeUndefined();
     });
 

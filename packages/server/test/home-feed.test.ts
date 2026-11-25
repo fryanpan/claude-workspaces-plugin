@@ -186,8 +186,22 @@ describe('readHomeFeed escalation', () => {
     expect(read(noLead)).toEqual(noLead);
   });
 
+  it('keeps any id the server accepts for an agent, non-ASCII and 200 long included', () => {
+    for (const lead of ['agent-río-lead', 'x'.repeat(200)]) {
+      expect(read({ ...good, lead })?.lead).toBe(lead);
+    }
+  });
+
   it('drops a lead id that is not a plain id, and keeps the rest', () => {
-    for (const lead of ['agent lead', 'agent\nlead', '<b>x</b>', 'x'.repeat(200), 7]) {
+    for (const lead of [
+      'agent lead',
+      'agent\nlead',
+      'a/b',
+      'a\\b',
+      'x'.repeat(201),
+      'a\u202eb',
+      7,
+    ]) {
       expect(read({ ...good, lead })).toEqual({ deadSince: SINCE, stuck: 3 });
     }
   });

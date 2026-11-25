@@ -9,16 +9,19 @@
  * Team Lead, the one party that can restart the lead, hears nothing.
  *
  * The Mac already pulls every remote board's home feed (`home-remotes.ts`),
- * and the machine files that item through the review queue, so the feed is
- * re-read the moment the board is escalated. The feed carries the
- * escalation as numbers and one plain agent id (`HomeFeedEscalation`,
+ * and the machine announces a change on Home whenever the escalation its
+ * feed reports appears, changes or goes (`onDeadBoardChange` in
+ * `stall-escalation.ts`), so the Mac re-reads the feed then. The feed
+ * carries the escalation as numbers and one agent id (`HomeFeedEscalation`,
  * checked by `readEscalation`); this module turns it into a stall frame for
  * Team Lead on whichever board here Team Lead holds a stream. No server
  * calls the Mac: the pull stays a pull.
  *
  * **No remote words in the frame.** The board id and origin come from the
- * Mac's own routing table; the lead id is checked against a plain-id
- * pattern; the rest are two numbers. The board's name and its rows are the
+ * Mac's own routing table; the lead id is one token of at most 200
+ * characters that the server's own agent-id rule accepts, with no
+ * whitespace, slash or control character, though the remote chose it; the
+ * rest are two numbers. The board's name and its rows are the
  * remote's text, which Home draws escaped for a person but which would reach
  * an agent as instructions, so they stay out.
  *

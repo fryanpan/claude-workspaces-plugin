@@ -245,6 +245,9 @@ export interface StallWiringContext {
   spawnerAgentId?: string;
   /** How often each board's keep-moving verdict is recorded (ms). */
   keepMovingCadenceMs?: number;
+  /** Tell Home, here and on every Mac pulling this server's feeds, that
+   *  what it shows may have moved (`landing-changes.ts`). */
+  notifyLanding?: () => void;
   /** Boards other servers hold, as their home feeds last said, and which
    *  origin holds each: a dead one there is told to Team Lead here
    *  (`remote-escalations.ts`). Absent → this server pulls no feeds. */
@@ -1306,6 +1309,8 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     dataDir,
     ...(ctx.stallEscalateMs !== undefined ? { escalateMs: ctx.stallEscalateMs } : {}),
     ...(teamLeadReach !== undefined ? { teamLead: teamLeadReach } : {}),
+    // The board's home feed moved: a Home elsewhere re-reads it.
+    ...(ctx.notifyLanding ? { onDeadBoardChange: () => ctx.notifyLanding?.() } : {}),
   });
   /**
    * The measurement (`keep-moving-verdict.ts`), fed the SAME snapshots the
@@ -1457,11 +1462,20 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     ...(ctx.checkInMs !== undefined ? { checkInRepeatMs: ctx.checkInMs } : {}),
     escalate: (board, now) => escalations.onBoard(board, now),
     escalateFleet: (boards, now) => {
-      waitingUnfiled.onTick(boards, now);
+      // Two passes, each isolated, so one that throws costs only itself.
+      try {
+        waitingUnfiled.onTick(boards, now);
+      } catch (err) {
+        console.error('[stall] fleet escalation failed:', err);
+      }
       // Boards on other servers, on the same clock: Team Lead holds no
       // stream there, so their own escalation cannot reach it.
-      if (remoteEscalations && ctx.remoteBoards) {
-        remoteEscalations.observe(ctx.remoteBoards.views(), now);
+      try {
+        if (remoteEscalations && ctx.remoteBoards) {
+          remoteEscalations.observe(ctx.remoteBoards.views(), now);
+        }
+      } catch (err) {
+        console.error('[stall] remote escalation failed:', err);
       }
     },
     // Prod restarts at every merge; without this each deploy would re-fire one

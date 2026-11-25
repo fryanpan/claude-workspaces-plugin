@@ -67,7 +67,7 @@ export type IdentityStatus = 'active' | 'archived';
 export type IdentityKind = 'person' | 'agent';
 
 /** The shape of an agent id — the watches store's rule, for the same field. */
-const AGENT_ID_RE = /^[^\s/\\]{1,200}$/;
+export const AGENT_ID_RE = /^[^\s/\\]{1,200}$/;
 
 export interface IdentityRecord {
   /** `user-<hash>`, derived from the email — see `emailIdentityId` — or, for
