@@ -249,4 +249,22 @@ describe('a server running the test sign-in', () => {
     elsewhere.searchParams.set('redirect_uri', 'https://riverbend.test/api/auth/callback/google');
     expect((await fetch(elsewhere)).status).toBe(400);
   });
+
+  // With no CW_OWNER_EMAIL, the setting alone makes Alice the owner, so her
+  // Add on the board page lets Bob in rather than filing an agent's proposal.
+  it("lets Alice add Bob from the board's page with no CW_OWNER_EMAIL", async () => {
+    const { jar } = await signInAs('alice');
+    const res = await browser(`/workspaces/${board}/audience`, {
+      method: 'POST',
+      headers: {
+        cookie: jar.header(),
+        origin,
+        'sec-fetch-site': 'same-origin',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ add: [BOB] }),
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+    expect(((await res.json()) as { added: string[] }).added).toEqual([BOB]);
+  });
 });

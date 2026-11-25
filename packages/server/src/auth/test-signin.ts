@@ -14,8 +14,10 @@
  *   every `*.localhost` name to loopback by itself, and the name is not a
  *   loopback name to the host guard, so a request there is a signed-in
  *   person rather than the box. `127.0.0.1:<port>` stays the box, as before.
- * - Alice is the owner. Bob may hold an account but reaches only what is
- *   shared with him, exactly as a share member does.
+ * - Alice is the owner, with no `CW_OWNER_EMAIL` needed: she can let Bob
+ *   into a board from its page. An explicit `CW_OWNER_EMAIL` still wins.
+ *   Bob may hold an account but reaches only what is shared with him,
+ *   exactly as a share member does.
  *
  * Refused, at boot, on prod's port (or any port another fleet service owns),
  * on a bind wider than loopback, with a real Google client configured, and
@@ -86,6 +88,9 @@ export function testSignInOptions(setting: TestSignInSetting, endpoints: GoogleE
     // sign-in address classifies by `localSignInHosts` instead, loopback only.
     proxiedTrustedHosts: [],
     proxiedTrustedEmails: [setting.owner],
+    // Alice is the owner without CW_OWNER_EMAIL, so her own browser can let
+    // Bob in. bin.ts spreads an explicit CW_OWNER_EMAIL after this, so it wins.
+    ownerEmail: setting.owner,
     signIn: {
       mode: 'better-auth' as const,
       origin: setting.origin,
