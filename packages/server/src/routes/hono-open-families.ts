@@ -13,18 +13,15 @@
  * request would be refused there before its own check could run. So the env
  * here is empty (`HonoOpenAppEnv`), and a handler reads only the request.
  *
- * PATTERNS are each handler's own path tests, written as Hono paths. The
- * handler still decides; an address it declines goes to `next()`.
+ * PATTERNS are each module's rows in `route-table-rows.ts` (`rowPatterns`):
+ * each handler answers exactly the addresses its rows name. The handler
+ * still decides; an address it declines goes to `next()`.
  */
 import type { HonoOpenAppEnv, HonoOpenFamily } from '../hono-env.ts';
 import { type BoardImportRoutesContext, handleBoardImportRoute } from './board-import.ts';
-import {
-  GITHUB_PUSH_KEYS_PATH,
-  type GithubHubRoutesContext,
-  handleGithubHubRoute,
-} from './github-hub.ts';
+import { type GithubHubRoutesContext, handleGithubHubRoute } from './github-hub.ts';
 import { type HomeFeedRoutesContext, handleHomeFeedRoute } from './home-feed.ts';
-import { claimWith } from './hono-families.ts';
+import { claimWith, rowPatterns } from './hono-families.ts';
 
 /** Everything long-lived the open families read. Built once by `server.ts`. */
 export interface HonoOpenFamiliesContext {
@@ -49,7 +46,7 @@ export function honoOpenFamilies(ctx: HonoOpenFamiliesContext): HonoOpenFamily[]
       claimWith<HonoOpenAppEnv, ReturnType<typeof requestOf>>(
         app,
         requestOf,
-        ['/workspaces/:ws/home-feed', '/workspaces/:ws/home-feed/*'],
+        rowPatterns('home-feed.ts'),
         (v) => handleHomeFeedRoute(ctx.homeFeedCtx, v.req, v.pathname),
       ),
     // routes/board-import.ts — `/api/board-import/<board>` and its print.
@@ -57,7 +54,7 @@ export function honoOpenFamilies(ctx: HonoOpenFamiliesContext): HonoOpenFamily[]
       claimWith<HonoOpenAppEnv, ReturnType<typeof requestOf>>(
         app,
         requestOf,
-        ['/api/board-import/:board', '/api/board-import/:board/print'],
+        rowPatterns('board-import.ts'),
         (v) => handleBoardImportRoute(ctx.boardImportCtx, v.req, v.pathname),
       ),
     // routes/github-hub.ts — the push keys, a board's own subscriptions, and
@@ -66,12 +63,7 @@ export function honoOpenFamilies(ctx: HonoOpenFamiliesContext): HonoOpenFamily[]
       claimWith<HonoOpenAppEnv, ReturnType<typeof requestOf>>(
         app,
         requestOf,
-        [
-          GITHUB_PUSH_KEYS_PATH,
-          '/workspaces/:ws/github-subscriptions',
-          '/workspaces/:ws/github/subscriptions',
-          '/workspaces/:ws/github/events',
-        ],
+        rowPatterns('github-hub.ts'),
         (v) => handleGithubHubRoute(ctx.githubHubCtx, v.req, v.pathname),
       ),
   ];

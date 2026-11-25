@@ -122,7 +122,13 @@ flight. When the server is down it answers `initialize` itself, and sends
 `tools/list_changed` once the server answers. Everything else — frame
 handling, self-authored and bookkeeping drops, acks, watches — runs in the
 hosted session. `packages/server/test/relay-stdio.test.ts` drives the
-compiled relay and the node relay through the launcher against a real server.
+compiled relay and the node relay through the launcher against a real server:
+one table of cases, each run against both, one per job (the push hold goes
+through a proxy that keeps a tool call's answer back). CI runs on Linux, where
+the launcher cannot build Swift, so there the compiled arm skips itself and
+only the node relay runs. The Swift side is checked by running that file on a
+Mac with `/usr/bin/swiftc`, which builds it; do that whenever `relay.swift`
+changes.
 
 **Where a route lives.** Everything that decides which URL paths it answers is
 under `routes/`, `server.ts` composes and delegates to it and matches nothing

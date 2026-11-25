@@ -12,10 +12,13 @@
  *   still serves tokenless callers elsewhere, and a relay whose mint is
  *   refused gets no tools rather than someone else's;
  * - a server restart, and a server that is not up yet, cost the session no
- *   tools and no pushes.
+ *   tools and no pushes;
+ * - a push that arrives while a tool call waits is written after the call's
+ *   answer, never inside it.
  *
  * The compiled arm runs only on a Mac that can build it; the node arm runs
- * everywhere. All fixtures synthetic; port 0; no production server, discovery
+ * everywhere. CI is Linux, so CI runs the node arm alone: a change to
+ * relay.swift is checked by running this file on a Mac. All fixtures synthetic; port 0; no production server, discovery
  * file or plugin cache is touched — every child gets a temp HOME.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test';
@@ -29,10 +32,12 @@ import { identityHeaders, initializeBody } from './connector-harness.ts';
 import {
   type ChildArm,
   FULL_ARM,
+  type HoldingProxy,
   type StdioChild,
   compiledArm,
   nodeRelayArm,
   startChild,
+  startHoldingProxy,
 } from './relay-harness.ts';
 import { waitFor } from './wait-for.ts';
 import { seedBoard } from './workspace-seed.ts';
@@ -56,6 +61,7 @@ let dataDir: string;
 let workDir: string;
 let handles: ServerHandle[] = [];
 let children: StdioChild[] = [];
+let proxies: HoldingProxy[] = [];
 
 /**
  * The server, with the token NOT required: `/mcp` must refuse a tokenless
@@ -115,8 +121,10 @@ describe.each(ARMS)('the $kind relay', (arm) => {
   });
   afterEach(async () => {
     for (const c of children) await c.stop();
+    for (const p of proxies) p.stop();
     for (const h of handles) await h.stop();
     children = [];
+    proxies = [];
     handles = [];
   });
   afterAll(() => {
@@ -185,6 +193,52 @@ describe.each(ARMS)('the $kind relay', (arm) => {
     expect(relay.channel().filter((p) => String(p.content).includes('tighten this')).length).toBe(
       1,
     );
+  }, 40_000);
+
+  it('holds a push that arrives during a tool call until the call is answered', async () => {
+    // A frame written between a tool call's request and its answer is never
+    // seen by the session, so both relays hold it. The proxy keeps the call's
+    // answer back while the comment's frame reaches the relay.
+    const { base } = boot();
+    const ws = await seedBoard(base);
+    const docId = await makeDoc(base, ws, 'held');
+    const proxy = startHoldingProxy(base);
+    proxies.push(proxy);
+    const child = start(arm, proxy.base);
+    await child.handshake();
+    expect((await child.callTool('watch_doc', { docId })).isError).toBe(false);
+    await comment(base, ws, docId, 'control line');
+    await waitFor(() => channelWith(child, 'control line'), {
+      timeout: 10_000,
+      describe: 'the control comment, outside any call',
+    });
+
+    const held = proxy.holdNextCall();
+    const answer = child.request('tools/call', { name: 'list_watched_docs', arguments: {} });
+    await waitFor(() => held.answered(), { describe: 'the server to answer the held call' });
+    await comment(base, ws, docId, 'pushed during the call');
+    await waitFor(() => proxy.streamed().includes('pushed during the call'), {
+      timeout: 10_000,
+      describe: 'the frame to reach the relay',
+    });
+    // A request answered after the frame arrived: a relay that does not hold
+    // has written the frame by now.
+    await child.request('ping');
+    expect(channelWith(child, 'pushed during the call')).toBeUndefined();
+
+    held.release();
+    const answered = await answer;
+    await waitFor(() => channelWith(child, 'pushed during the call'), {
+      describe: 'the held frame once the call is answered',
+    });
+    const at = (pred: (m: Record<string, unknown>) => boolean) => child.messages.findIndex(pred);
+    expect(
+      at(
+        (m) =>
+          m.method === 'notifications/claude/channel' &&
+          String((m.params as { content?: unknown }).content).includes('pushed during the call'),
+      ),
+    ).toBeGreaterThan(at((m) => m === answered));
   }, 40_000);
 
   it('stays on the relay for a name and a directory that are not ASCII, and the server reads both', async () => {

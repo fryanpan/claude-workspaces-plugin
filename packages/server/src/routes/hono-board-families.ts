@@ -44,7 +44,7 @@ import {
   handleDocPromoteRoute,
   handleDocResourceRoutes,
 } from './docs.ts';
-import { type HonoFamiliesContext, chainValues, claimWith } from './hono-families.ts';
+import { type HonoFamiliesContext, chainValues, claimWith, rowPatterns } from './hono-families.ts';
 import {
   type MeetingCalendarRoutesContext,
   handleMeetingCalendarRoutes,
@@ -283,7 +283,7 @@ export function honoBoardFamilies(ctx: HonoBoardFamiliesContext): HonoBoardFamil
       ),
     // routes/chat-audit-routes.ts — `chat-audit` and `chat-audit/<agent>`.
     (app) =>
-      claim(app, ctx, ['/workspaces/:ws/chat-audit', '/workspaces/:ws/chat-audit/:agent'], (v) =>
+      claim(app, ctx, rowPatterns('chat-audit-routes.ts'), (v) =>
         handleChatAuditRoutes(ctx.chatAuditRoutesCtx, {
           scope: v.scope,
           req: v.req,
@@ -304,7 +304,7 @@ export function honoBoardFamilies(ctx: HonoBoardFamiliesContext): HonoBoardFamil
       }),
     // routes/doc-move.ts — `docs/<id>/move`.
     (app) =>
-      claim(app, ctx, ['/workspaces/:ws/docs/:docId/move'], (v) =>
+      claim(app, ctx, rowPatterns('doc-move.ts'), (v) =>
         handleDocMoveRoute(ctx.docMoveRoutesCtx, {
           scope: v.scope,
           req: v.req,
