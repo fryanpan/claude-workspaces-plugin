@@ -15,6 +15,7 @@
     "scripts/**/*.ts",
     "infra/project-machine/**/*.ts",
     "infra/handoff/**/*.ts",
+    "infra/org-relay/**/*.ts",
     "infra/board-router-worker/**/*.ts",
     "infra/signin-test/**/*.ts",
     "templates/*/src/**/*.ts",

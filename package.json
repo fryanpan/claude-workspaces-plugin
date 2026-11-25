@@ -21,6 +21,7 @@
     "store:read": "bun run infra/project-machine/store-read.ts",
     "machine:sync-board": "bun run packages/server/src/bound-file-sync/sync-bin.ts",
     "machine:tokens": "bun run infra/project-machine/tokens.ts",
+    "relay:install": "bun run infra/org-relay/install-cli.ts",
     "cf:plan": "bun run infra/cloudflare/run.ts plan",
     "cf:apply": "bun run infra/cloudflare/run.ts apply",
     "cf:sync-config": "bun run infra/cloudflare/sync-config.ts",

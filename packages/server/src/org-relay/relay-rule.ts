@@ -4,8 +4,10 @@
  *
  * Bryan's direction (15 Oct): agents chat freely inside an organization;
  * across organizations, only seats with cross-organization access may. The
- * access governs both directions (`RelaySeat.crossOrganization`), so a
- * message crosses only when the sender and the recipient both hold it. Both
+ * access is a seat's (`RelaySeat.crossOrganization`): a message crosses only
+ * when the sender or the recipient holds it, so a seat that holds it, Team
+ * Lead's, reaches every lead and hears from each, while two seats in
+ * different organizations that do not hold it never reach each other. Both
  * seats come from the config, so the organization of each is the config's
  * answer and never a name the message carries.
  */
@@ -35,8 +37,8 @@ export function applyOrganizationRule(
   if (text.trim() === '' && !kindAllowsEmpty(kind)) return { kind: 'refuse', reason: 'empty' };
   if (text.length > RELAY_MAX_TEXT) return { kind: 'refuse', reason: 'too-long' };
   const crossOrganization = from.organization !== to.organization;
-  // Both ends: a seat without the access neither sends nor receives across.
-  if (crossOrganization && !(from.crossOrganization && to.crossOrganization)) {
+  // One end must hold the access: two seats without it never cross.
+  if (crossOrganization && !(from.crossOrganization || to.crossOrganization)) {
     return { kind: 'refuse', reason: 'cross-organization' };
   }
   // A restart only from a seat the recipient's own entry names.

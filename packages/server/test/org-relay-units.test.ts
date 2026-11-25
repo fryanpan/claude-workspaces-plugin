@@ -187,11 +187,35 @@ describe('the organization rule', () => {
     });
   });
 
-  it('refuses across organizations unless BOTH seats hold that access', () => {
+  it('refuses across organizations unless one of the two seats holds that access', () => {
     const refused = { kind: 'refuse', reason: 'cross-organization' } as const;
-    // harbor-lead holds none: it neither sends nor receives across.
-    expect(applyOrganizationRule(c, 'harbor-lead', 'river-lead', 'hi')).toEqual(refused);
-    expect(applyOrganizationRule(c, 'river-lead', 'harbor-lead', 'hi')).toEqual(refused);
+    // Two leads in different organizations, neither holding it.
+    const neither = parsed(
+      config({
+        seats: {
+          'river-lead': {
+            server: 'river',
+            board: 'w-river',
+            agentId: 'agent-river-lead',
+            outboxDoc: 'task:t-out-3',
+            inboxDoc: 'task:t-in-3',
+          },
+        },
+      }),
+    );
+    expect(applyOrganizationRule(neither, 'harbor-lead', 'river-lead', 'hi')).toEqual(refused);
+    expect(applyOrganizationRule(neither, 'river-lead', 'harbor-lead', 'hi')).toEqual(refused);
+    // river-lead holds it (Team Lead's seat, say) and harbor-lead does not:
+    // both directions cross, through the filter.
+    for (const [from, to] of [
+      ['river-lead', 'harbor-lead'],
+      ['harbor-lead', 'river-lead'],
+    ] as const)
+      expect(applyOrganizationRule(c, from, to, 'hi')).toMatchObject({
+        kind: 'allow',
+        crossOrganization: true,
+        filter: true,
+      });
     const both = parsed(
       config({
         seats: {
