@@ -504,8 +504,10 @@ doc triage is batch work nobody waits on. The git proxy for sandboxed leads
 serves agents, not a person looking at a page.
 
 A change to the template reaches prod only when the plist is installed again
-and launchd loads it again (bootout, then bootstrap). A deploy's kickstart
-restarts the job from the plist launchd already holds. `scripts/launchd/render-plist.test.ts` renders the template
+and launchd loads it again (bootout, then bootstrap). A deploy's restart (the
+server exits and `KeepAlive` relaunches it) and a manual kickstart both reuse
+the plist launchd already holds. `scripts/launchd/render-plist.test.ts`
+renders the template
 through the same function `install.sh` calls and checks the parsed result.
 
 ## Where things live
