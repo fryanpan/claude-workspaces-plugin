@@ -250,6 +250,8 @@ the guard is `--git-dir == --git-common-dir`, and it still holds: prod no
 longer deploys from there, but building bundles in the primary working copy
 is its own accident): :8788, throwaway data dir; prod stays on 8787. Agent:
 `FEEDBACK_BASE_URL=http://<host>:8788` at launch; data never migrates to prod.
+`--test-signin` signs in Alice (owner) or Bob at `http://signin.localhost:<port>`
+with no Google account (security.md, "A staging server can sign in").
 
 ## Leak gates (public repo) — one at commit, one at push
 

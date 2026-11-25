@@ -93,6 +93,8 @@ export interface SignInDoorOptions {
 export interface SignInDoor {
   /** The configured mode. */
   mode: SignInMode;
+  /** The local test sign-in's hostname (`auth/test-signin.ts`), or null. */
+  localHost: string | null;
   /** The mode in force now: `both` for `better-auth` until the guard opens. */
   effectiveMode(): SignInMode;
   /**
@@ -169,7 +171,8 @@ export function createSignInDoor(opts: SignInDoorOptions): SignInDoor {
     return redirect(308, `${signIn.origin}${pathname}${search}`);
   };
 
-  return { mode, effectiveMode, verifier, claim, redirectFor };
+  const localHost = active && signIn?.localOnly ? signIn.host : null;
+  return { mode, localHost, effectiveMode, verifier, claim, redirectFor };
 }
 
 function redirect(status: number, location: string): Response {
