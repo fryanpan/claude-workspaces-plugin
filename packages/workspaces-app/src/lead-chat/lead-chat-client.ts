@@ -145,7 +145,18 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
     try {
       const res = await doFetch(`${base}/lead-chat`, { credentials: 'same-origin' });
       if (res.status === 403) {
-        state = { ...state, loaded: true, canTalk: false, ownersOnly: true };
+        // Nothing a reader held before the refusal stays: a demoted page
+        // must not keep showing the owner's chat it once read.
+        state = {
+          lead: null,
+          messages: [],
+          canTalk: false,
+          loaded: true,
+          meeting: null,
+          more: false,
+          loadingOlder: false,
+          ownersOnly: true,
+        };
         changed();
         return;
       }

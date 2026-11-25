@@ -9,6 +9,14 @@ import { describe, expect, it } from 'vitest';
 import { GENERAL_REFUSED, generalSub } from '../src/lead-chat/lead-chat-channel-wiring.ts';
 import { createLeadChatClient } from '../src/lead-chat/lead-chat-client.ts';
 
+const MSG = {
+  id: 'm1',
+  role: 'agent',
+  author: { id: 'a', name: 'Lead' },
+  text: 'The owner’s plan for Riverbend.',
+  ts: 1,
+};
+
 class QuietStream {
   readyState = 1;
   addEventListener() {}
@@ -50,6 +58,40 @@ describe('who #general says can read it', () => {
       'The board owner’s chat with Lead. Only the owner can open it.',
     );
     expect(GENERAL_REFUSED).toContain('Only the board’s owner can read this chat');
+  });
+
+  it('drops the chat it held when a later read is refused', async () => {
+    const answers = [
+      {
+        status: 200,
+        body: { lead: { agentId: 'a', name: 'Lead' }, messages: [MSG], canTalk: true },
+      },
+      { status: 403, body: { error: 'out_of_share_scope' } },
+    ];
+    const listeners = new Map<string, () => void>();
+    const stream = {
+      readyState: 1,
+      addEventListener: (type: string, fn: () => void) => listeners.set(type, fn),
+      close() {},
+    };
+    const client = createLeadChatClient({
+      workspaceId: 'w-harbor',
+      fetch: (async () => {
+        const a = answers.shift() ?? { status: 403, body: {} };
+        return new Response(JSON.stringify(a.body), { status: a.status });
+      }) as unknown as typeof fetch,
+      stream: stream as unknown as EventSource,
+    });
+    await settled(client);
+    expect(client.state().messages).toHaveLength(1);
+    // The stream drops and comes back, which reads again.
+    listeners.get('error')?.();
+    listeners.get('open')?.();
+    for (let i = 0; i < 20 && !client.state().ownersOnly; i++)
+      await new Promise((r) => setTimeout(r, 0));
+    expect(client.state().ownersOnly).toBe(true);
+    expect(client.state().messages).toEqual([]);
+    expect(client.state().lead).toBe(null);
   });
 
   it('a failure that is not a refusal still reads as loading', async () => {
