@@ -13,15 +13,16 @@
  * request would be refused there before its own check could run. So the env
  * here is empty (`HonoOpenAppEnv`), and a handler reads only the request.
  *
- * PATTERNS are each module's rows in `route-table-rows.ts` (`rowPatterns`):
- * each handler answers exactly the addresses its rows name. The handler
- * still decides; an address it declines goes to `next()`.
+ * PATTERNS are each module's rows in `route-table-rows.ts`, and each handler
+ * is handed the row the request matched (`row-dispatch.ts`): it answers
+ * exactly the addresses its rows name, without testing the path again. The
+ * handler still decides; an address it declines goes to `next()`.
  */
 import type { HonoOpenAppEnv, HonoOpenFamily } from '../hono-env.ts';
 import { type BoardImportRoutesContext, handleBoardImportRoute } from './board-import.ts';
 import { type GithubHubRoutesContext, handleGithubHubRoute } from './github-hub.ts';
 import { type HomeFeedRoutesContext, handleHomeFeedRoute } from './home-feed.ts';
-import { claimWith, rowPatterns } from './hono-families.ts';
+import { claimRowsWith } from './hono-families.ts';
 
 /** Everything long-lived the open families read. Built once by `server.ts`. */
 export interface HonoOpenFamiliesContext {
@@ -32,39 +33,36 @@ export interface HonoOpenFamiliesContext {
   githubHubCtx: GithubHubRoutesContext;
 }
 
-/** The request and its path: all an open family reads. */
-const requestOf = (c: { req: { raw: Request } }) => {
-  const req = c.req.raw;
-  return { req, pathname: new URL(req.url).pathname };
-};
+/** The request: all an open family reads besides its row. */
+const requestOf = (c: { req: { raw: Request } }) => ({ req: c.req.raw });
 
 /** The families, in the order the gates used to try them. */
 export function honoOpenFamilies(ctx: HonoOpenFamiliesContext): HonoOpenFamily[] {
   return [
     // routes/home-feed.ts — `/workspaces/<id>/home-feed` and its stream.
     (app) =>
-      claimWith<HonoOpenAppEnv, ReturnType<typeof requestOf>>(
+      claimRowsWith<HonoOpenAppEnv, ReturnType<typeof requestOf>>(
         app,
         requestOf,
-        rowPatterns('home-feed.ts'),
-        (v) => handleHomeFeedRoute(ctx.homeFeedCtx, v.req, v.pathname),
+        'home-feed.ts',
+        (v, row) => handleHomeFeedRoute(ctx.homeFeedCtx, v.req, row),
       ),
     // routes/board-import.ts — `/api/board-import/<board>` and its print.
     (app) =>
-      claimWith<HonoOpenAppEnv, ReturnType<typeof requestOf>>(
+      claimRowsWith<HonoOpenAppEnv, ReturnType<typeof requestOf>>(
         app,
         requestOf,
-        rowPatterns('board-import.ts'),
-        (v) => handleBoardImportRoute(ctx.boardImportCtx, v.req, v.pathname),
+        'board-import.ts',
+        (v, row) => handleBoardImportRoute(ctx.boardImportCtx, v.req, row),
       ),
     // routes/github-hub.ts — the push keys, a board's own subscriptions, and
     // the relay's subscriptions and events.
     (app) =>
-      claimWith<HonoOpenAppEnv, ReturnType<typeof requestOf>>(
+      claimRowsWith<HonoOpenAppEnv, ReturnType<typeof requestOf>>(
         app,
         requestOf,
-        rowPatterns('github-hub.ts'),
-        (v) => handleGithubHubRoute(ctx.githubHubCtx, v.req, v.pathname),
+        'github-hub.ts',
+        (v, row) => handleGithubHubRoute(ctx.githubHubCtx, v.req, row),
       ),
   ];
 }

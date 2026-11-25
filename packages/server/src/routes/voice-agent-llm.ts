@@ -26,6 +26,7 @@ import {
   bearerMatches,
   parseAgentLlmRequest,
 } from '../spoken-reply/agent-llm.ts';
+import { type RouteRow, rowHandlers } from './row-dispatch.ts';
 
 export interface VoiceAgentLlmRoutesContext {
   callbacks: AgentCallbacks;
@@ -36,7 +37,8 @@ export interface VoiceAgentLlmRoutesContext {
 
 export interface VoiceAgentLlmRouteRequest {
   req: Request;
-  pathname: string;
+  /** The route-table row the router matched. */
+  row: RouteRow;
   /** The request arrived as a share-link visitor (a share or collab scope). */
   shareVisitor: boolean;
 }
@@ -45,8 +47,17 @@ export async function handleVoiceAgentLlmRoute(
   ctx: VoiceAgentLlmRoutesContext,
   rq: VoiceAgentLlmRouteRequest,
 ): Promise<Response | undefined> {
-  const { req, pathname } = rq;
-  if (pathname !== VOICE_AGENT_LLM_PATH || req.method !== 'POST') return undefined;
+  return (await ROWS(ctx, rq)) ?? undefined;
+}
+
+const ROWS = rowHandlers('voice-agent-llm.ts', { [VOICE_AGENT_LLM_PATH]: answer });
+
+async function answer(
+  ctx: VoiceAgentLlmRoutesContext,
+  rq: VoiceAgentLlmRouteRequest,
+): Promise<Response | undefined> {
+  const { req } = rq;
+  if (req.method !== 'POST') return undefined;
   const { j } = ctx;
   const secret = ctx.llmSecret;
   if (!secret || rq.shareVisitor) return j(404, { error: 'not_found' });

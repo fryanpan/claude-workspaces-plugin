@@ -19,6 +19,7 @@ import type {
   WorkspaceRoutesContext,
 } from '../src/routes/workspace-routes-context.ts';
 import { PAGE_LOAD_BUDGET_MS, SlowLoadAlarm } from '../src/slow-load-alarm.ts';
+import { rowAt } from './route-row.ts';
 
 const T0 = 1_800_000_000_000;
 const dirs: string[] = [];
@@ -68,7 +69,7 @@ function rig(clock = { now: T0 }) {
       },
       {
         req: new Request('http://localhost/api/load-reports', { method: 'POST' }),
-        pathname: '/api/load-reports',
+        row: rowAt('load-reports.ts', '/api/load-reports'),
         visitor: visitor ? ({ kind: 'workspace', workspaceId: 'w-1' } as never) : null,
       },
     );

@@ -60,9 +60,11 @@
  *
  * ROWS THAT DISPATCH. The ORDER of families stays in the router, but for a
  * family whose handler answers only the addresses its rows name, the PATTERNS
- * it is registered on are its rows (`rowPatterns` in `routes/hono-families.ts`).
- * For those modules a row is no longer only a claim: delete one and its
- * address stops being answered. Eighteen modules are dispatched this way; the
+ * it is registered on are its rows, and its handler is handed the row it
+ * matched (`routes/row-dispatch.ts`) instead of testing the path itself. For
+ * those modules a row is no longer only a claim: delete one and the module
+ * refuses to load until its handler for that row goes too. Eighteen modules
+ * are dispatched this way; the
  * rest still register hand-written patterns, and
  * `test/hono-row-dispatch.test.ts` names both sets.
  *

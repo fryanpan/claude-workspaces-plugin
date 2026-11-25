@@ -44,12 +44,18 @@ import {
   handleDocPromoteRoute,
   handleDocResourceRoutes,
 } from './docs.ts';
-import { type HonoFamiliesContext, chainValues, claimWith, rowPatterns } from './hono-families.ts';
+import {
+  type HonoFamiliesContext,
+  chainValues,
+  claimRowsWith,
+  claimWith,
+} from './hono-families.ts';
 import {
   type MeetingCalendarRoutesContext,
   handleMeetingCalendarRoutes,
 } from './meetings-calendar.ts';
 import { type ReviewFileRoutesContext, handleReviewFileRoutes } from './review-files.ts';
+import type { RouteRow } from './row-dispatch.ts';
 import { type TaskRoutesContext, handleDispatchAndNoteRoutes, handleTaskRoutes } from './tasks.ts';
 import { handleWhiteboardCreateRoute } from './whiteboard-routes.ts';
 import { handleLibraryFolderRoutes } from './workspace-library-folders.ts';
@@ -122,6 +128,16 @@ function claim(
   answer: (v: BoardValues) => Answer | Promise<Answer>,
 ): void {
   claimWith(app, (c) => boardValues(c, ctx), patterns, answer);
+}
+
+/** `claimRowsWith` over the board values: a row-dispatched board family. */
+function claimRows(
+  app: Hono<HonoBoardAppEnv>,
+  ctx: HonoBoardFamiliesContext,
+  module: string,
+  answer: (v: BoardValues, row: RouteRow) => Answer | Promise<Answer>,
+): void {
+  claimRowsWith(app, (c) => boardValues(c, ctx), module, answer);
 }
 
 /** Every address under a board, and the bare collection. */
@@ -285,11 +301,11 @@ export function honoBoardFamilies(ctx: HonoBoardFamiliesContext): HonoBoardFamil
       ),
     // routes/chat-audit-routes.ts — `chat-audit` and `chat-audit/<agent>`.
     (app) =>
-      claim(app, ctx, rowPatterns('chat-audit-routes.ts'), (v) =>
+      claimRows(app, ctx, 'chat-audit-routes.ts', (v, row) =>
         handleChatAuditRoutes(ctx.chatAuditRoutesCtx, {
           scope: v.scope,
           req: v.req,
-          pathname: v.pathname,
+          row,
           visitor: v.visitor,
         }),
       ),
@@ -306,10 +322,11 @@ export function honoBoardFamilies(ctx: HonoBoardFamiliesContext): HonoBoardFamil
       }),
     // routes/doc-move.ts — `docs/<id>/move`.
     (app) =>
-      claim(app, ctx, rowPatterns('doc-move.ts'), (v) =>
+      claimRows(app, ctx, 'doc-move.ts', (v, row) =>
         handleDocMoveRoute(ctx.docMoveRoutesCtx, {
           scope: v.scope,
           req: v.req,
+          row,
           visitor: v.visitor,
         }),
       ),

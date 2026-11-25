@@ -20,6 +20,7 @@ import {
   handleHomeRemotesRoute,
 } from '../src/routes/ops.ts';
 import { SseBus } from '../src/sse.ts';
+import { rowAt } from './route-row.ts';
 
 const source = (over: Partial<LeadStatusSource> = {}): LeadStatusSource => ({
   getWorkspace: () => ({ leadAgentId: 'agent-riverbend-lead' }),
@@ -87,7 +88,7 @@ describe('GET /api/home-remotes', () => {
   const ctx = { j, remoteBoards: () => [view] } as unknown as OpsRoutesContext;
   const rq = (visitor: ShareTarget | null): OpsRouteRequest => ({
     req: new Request('http://localhost/api/home-remotes'),
-    pathname: '/api/home-remotes',
+    row: rowAt('ops.ts', '/api/home-remotes'),
     visitor,
     authorFor: () => undefined,
   });
@@ -138,7 +139,7 @@ describe('the feed stream and its follower', () => {
     const res = await handleHomeFeedRoute(
       ctx,
       req,
-      '/workspaces/w-riverbend/home-feed/events:stream',
+      rowAt('home-feed.ts', '/workspaces/w-riverbend/home-feed/events:stream'),
     );
     expect(res?.status).toBe(200);
     expect(followers.followed('w-riverbend')).toBe(true);

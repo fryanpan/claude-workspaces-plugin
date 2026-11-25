@@ -7,9 +7,11 @@ import { afterEach, describe, expect, it, spyOn } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { matchRow } from '../src/routes/row-dispatch.ts';
 import { type VoiceApiRouteRequest, handleVoiceApiRoutes } from '../src/routes/voice-api.ts';
 import { VoiceChat } from '../src/voice-api/chat.ts';
 import { VoiceApiTokens, voiceApiTokenKey, voiceTokensPath } from '../src/voice-api/tokens.ts';
+import { rowAt } from './route-row.ts';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -31,7 +33,7 @@ function ctx(now: () => number = Date.now) {
 function mint(over: Partial<VoiceApiRouteRequest>): VoiceApiRouteRequest {
   return {
     req: new Request('http://h/api/voice/tokens', { method: 'POST', body: '{"label":"Phone"}' }),
-    pathname: '/api/voice/tokens',
+    row: rowAt('voice-api.ts', '/api/voice/tokens'),
     visitor: null,
     ownerProven: () => false,
     anyoneProven: () => false,
@@ -67,7 +69,10 @@ describe('the voice token routes', () => {
   });
 
   it('claims no other path', async () => {
-    expect(await handleVoiceApiRoutes(ctx(), mint({ pathname: '/api/voice/agents' }))).toBeNull();
+    expect(matchRow('voice-api.ts', '/api/voice/agents')).toBeNull();
+    // A revoke whose id is not a token id's shape is not this route either.
+    const short = rowAt('voice-api.ts', '/api/voice/tokens/short/revoke');
+    expect(await handleVoiceApiRoutes(ctx(), mint({ row: short }))).toBeNull();
   });
 
   it('answer a minted value once: never in the list, and never logged', async () => {
@@ -108,7 +113,7 @@ describe('the voice token routes', () => {
           req: new Request('http://h/v1/models', {
             headers: { authorization: `Bearer ${minted.token}` },
           }),
-          pathname: '/v1/models',
+          row: rowAt('voice-api.ts', '/v1/models'),
         }),
       );
     expect((await models())?.status).toBe(200);
@@ -118,7 +123,7 @@ describe('the voice token routes', () => {
       c,
       mint({
         req: new Request(`http://h/api/voice/tokens/${minted.id}/revoke`, { method: 'POST' }),
-        pathname: `/api/voice/tokens/${minted.id}/revoke`,
+        row: rowAt('voice-api.ts', `/api/voice/tokens/${minted.id}/revoke`),
       }),
     );
     expect(revoked?.status).toBe(200);

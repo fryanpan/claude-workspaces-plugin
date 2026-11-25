@@ -56,9 +56,10 @@ import type { CfAccessVerifier } from '../middleware/cf-access.ts';
 import { isLoopbackAddress } from '../middleware/host-guard.ts';
 import { isBrowserRequest } from '../middleware/write-gate.ts';
 import { type SseBus, openSseStream } from '../sse.ts';
+import { type RouteRow, rowHandlers } from './row-dispatch.ts';
 
-const FEED_PATH =
-  /^\/workspaces\/([A-Za-z0-9_-]{1,128})\/home-feed(\/events:stream|\/escalation-ack)?$/;
+/** A board id this family answers for: any other segment in its place is not its address. */
+const BOARD_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
 export interface HomeFeedRoutesContext {
   sse: SseBus;
@@ -173,28 +174,52 @@ export async function escalationAckCallerAllowed(
   return macCallerAllowed(ctx, req, boardId);
 }
 
+/** What only this request knows: the request and the row the router matched. */
+interface HomeFeedRouteRequest {
+  req: Request;
+  row: RouteRow;
+}
+
 export async function handleHomeFeedRoute(
   ctx: HomeFeedRoutesContext,
   req: Request,
-  pathname: string,
+  row: RouteRow,
 ): Promise<Response | null> {
-  const m = FEED_PATH.exec(pathname);
-  if (!m) return null;
-  const boardId = m[1] as string;
+  if (!BOARD_ID.test(row.params.ws ?? '')) return null;
   const shut = refuseWhileExternalAccessOff(ctx, req);
   if (shut) return shut;
-  if (m[2] === '/escalation-ack') {
-    if (!(await escalationAckCallerAllowed(ctx, req, boardId))) {
-      return ctx.j(403, { error: 'forbidden' });
-    }
-    return ackRoute(ctx, req, boardId);
-  }
+  return ROWS(ctx, { req, row });
+}
+
+const ROWS = rowHandlers<HomeFeedRoutesContext, HomeFeedRouteRequest, Promise<Response>>(
+  'home-feed.ts',
+  {
+    '/workspaces/:ws/home-feed': (ctx, rq) => feedRoute(ctx, rq.req, rq.row, false),
+    '/workspaces/:ws/home-feed/events:stream': (ctx, rq) => feedRoute(ctx, rq.req, rq.row, true),
+    '/workspaces/:ws/home-feed/escalation-ack': async (ctx, { req, row }) => {
+      const boardId = row.params.ws ?? '';
+      if (!(await escalationAckCallerAllowed(ctx, req, boardId))) {
+        return ctx.j(403, { error: 'forbidden' });
+      }
+      return ackRoute(ctx, req, boardId);
+    },
+  },
+);
+
+/** The feed, or (`stream`) its live stream. */
+async function feedRoute(
+  ctx: HomeFeedRoutesContext,
+  req: Request,
+  row: RouteRow,
+  stream: boolean,
+): Promise<Response> {
+  const boardId = row.params.ws ?? '';
   if (!(await homeFeedCallerAllowed(ctx, req, boardId))) {
     return ctx.j(403, { error: 'forbidden' });
   }
   if (req.method !== 'GET') return ctx.j(405, { error: 'method-not-allowed' });
   if (ctx.boardName(boardId) === undefined) return ctx.j(404, { error: 'not_found' });
-  if (m[2]) {
+  if (stream) {
     // Closed when the caller goes: a follower is one holding the stream.
     const close = ctx.followers?.opened(boardId);
     if (close) req.signal.addEventListener('abort', close, { once: true });

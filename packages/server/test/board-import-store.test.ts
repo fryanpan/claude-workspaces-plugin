@@ -16,6 +16,7 @@ import {
 } from '../../../infra/project-machine/board-import-store.ts';
 import type { CfAccessResult } from '../src/middleware/cf-access.ts';
 import { boardImportCallerAllowed, handleBoardImportRoute } from '../src/routes/board-import.ts';
+import { rowAt } from './route-row.ts';
 
 const scratch = mkdtempSync(join(tmpdir(), 'cw-board-import-'));
 afterAll(() => rmSync(scratch, { recursive: true, force: true }));
@@ -37,14 +38,18 @@ describe('the board import route', () => {
         j,
       },
       tunnel(),
-      `/api/board-import/${BOARD}`,
+      rowAt('board-import.ts', `/api/board-import/${BOARD}`),
     );
     expect(res).toBeNull();
   });
 
   it('declines when the chain carries no context for it at all', async () => {
     expect(
-      await handleBoardImportRoute(undefined, tunnel(), `/api/board-import/${BOARD}`),
+      await handleBoardImportRoute(
+        undefined,
+        tunnel(),
+        rowAt('board-import.ts', `/api/board-import/${BOARD}`),
+      ),
     ).toBeNull();
   });
 

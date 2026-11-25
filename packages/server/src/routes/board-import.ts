@@ -48,8 +48,10 @@ import {
 import type { CfAccessVerifier } from '../middleware/cf-access.ts';
 import type { ServerOptions } from '../server-options.ts';
 import { refuseWhileExternalAccessOff } from './home-feed.ts';
+import { type RouteRow, rowHandlers } from './row-dispatch.ts';
 
-const IMPORT_PATH = /^\/api\/board-import\/([A-Za-z0-9_-]{1,128})(\/print)?$/;
+/** A board id this family answers for: any other segment in its place is not its address. */
+const BOARD_ID = /^[A-Za-z0-9_-]{1,128}$/;
 
 export type BoardImportOptions = NonNullable<ServerOptions['boardImport']>;
 
@@ -119,29 +121,49 @@ async function readLimits(req: Request): Promise<BoardLimits | null> {
 export async function handleBoardImportRoute(
   ctx: BoardImportRoutesContext | undefined,
   req: Request,
-  pathname: string,
+  row: RouteRow,
 ): Promise<Response | null> {
   // A chain built without this family (a test's, or an older caller's) declines too.
   if (!ctx?.place) return null;
   const { place, j } = ctx;
-  const m = IMPORT_PATH.exec(pathname);
-  if (!m) return null;
+  const board = row.params.ws ?? '';
+  if (!BOARD_ID.test(board)) return null;
   const shut = refuseWhileExternalAccessOff(ctx, req);
   if (shut) return shut;
   if (!(await boardImportCallerAllowed(ctx, req))) return j(403, { error: 'forbidden' });
-  const board = m[1] as string;
   try {
     checkBoard(place, board);
   } catch {
     return j(403, { error: 'board_not_for_this_machine' });
   }
-  if (m[2]) {
-    if (req.method !== 'POST') return j(405, { error: 'method-not-allowed' });
-    const limits = await readLimits(req);
-    if (!limits) return j(400, { error: 'limits must be an object' });
-    if (!importStatus(place, board).holds) return j(404, { error: 'not_found' });
-    return j(200, await ctx.print(board, limits));
-  }
+  return ROWS({ ctx, place, board }, { req, row });
+}
+
+/** What every row reads once the caller and the board are checked. */
+interface Checked {
+  ctx: BoardImportRoutesContext;
+  place: NonNullable<BoardImportRoutesContext['place']>;
+  board: string;
+}
+
+const ROWS = rowHandlers<Checked, { req: Request; row: RouteRow }, Promise<Response>>(
+  'board-import.ts',
+  { '/api/board-import/:ws': push, '/api/board-import/:ws/print': print },
+);
+
+/** `POST …/print` — print what the held import would make, under `limits`. */
+async function print({ ctx, place, board }: Checked, { req }: { req: Request }): Promise<Response> {
+  const { j } = ctx;
+  if (req.method !== 'POST') return j(405, { error: 'method-not-allowed' });
+  const limits = await readLimits(req);
+  if (!limits) return j(400, { error: 'limits must be an object' });
+  if (!importStatus(place, board).holds) return j(404, { error: 'not_found' });
+  return j(200, await ctx.print(board, limits));
+}
+
+/** `GET` the import's status, or `PUT` a push of the board. */
+async function push({ ctx, place, board }: Checked, { req }: { req: Request }): Promise<Response> {
+  const { j } = ctx;
   if (req.method === 'GET') return j(200, importStatus(place, board));
   if (req.method !== 'PUT') return j(405, { error: 'method-not-allowed' });
   if (!req.body) return j(400, { error: 'no body' });

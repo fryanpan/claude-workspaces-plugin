@@ -48,6 +48,7 @@
 import { authorizeAgentCaller, refuseNonLocalAgentCaller } from '../auth/agent-token.ts';
 import type { ConnectorHost } from '../connector/host.ts';
 import { readIdentityHeaders, resolveIdentity } from '../connector/identity.ts';
+import { type RouteRow, rowHandlers } from './row-dispatch.ts';
 
 export interface McpConnectorRouteContext {
   host: ConnectorHost;
@@ -77,11 +78,26 @@ function agentsNamedBy(host: ConnectorHost, req: Request): Set<string> {
   return ids;
 }
 
+/** What only this request knows; `row` is the route-table row the router matched. */
+export interface McpConnectorRouteRequest {
+  req: Request;
+  row: RouteRow;
+  visitor: unknown;
+}
+
 export async function handleMcpConnectorRoute(
   ctx: McpConnectorRouteContext,
-  input: { req: Request; pathname: string; visitor: unknown },
+  input: McpConnectorRouteRequest,
 ): Promise<Response | null> {
-  if (input.pathname !== MCP_CONNECTOR_PATH) return null;
+  return ROWS(ctx, input);
+}
+
+const ROWS = rowHandlers('mcp-connector.ts', { [MCP_CONNECTOR_PATH]: answerConnector });
+
+async function answerConnector(
+  ctx: McpConnectorRouteContext,
+  input: McpConnectorRouteRequest,
+): Promise<Response> {
   const socketBoard = ctx.boardOfSocket(input.req);
   if (socketBoard !== null) return ctx.host.handle(input.req, { boardId: socketBoard });
   if (input.visitor) return ctx.j(403, { error: 'not available to share visitors' });

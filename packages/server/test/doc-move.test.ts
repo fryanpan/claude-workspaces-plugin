@@ -18,6 +18,7 @@ import type { ShareTarget } from '../src/middleware/host-guard.ts';
 import { MountStore } from '../src/mount-store.ts';
 import { type DocMoveRoutesContext, handleDocMoveRoute } from '../src/routes/doc-move.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { rowAt } from './route-row.ts';
 import { seedBoard } from './workspace-seed.ts';
 
 function git(repo: string, ...args: string[]): string {
@@ -172,6 +173,7 @@ describe('moveDocToProject', () => {
         req: new Request(`http://board.example/workspaces/${WS}/docs/${docId}/move`, {
           method: 'POST',
         }),
+        row: rowAt('doc-move.ts', `/workspaces/${WS}/docs/${docId}/move`),
         visitor,
       });
     const away = await ask({ workspaceId: WS } as ShareTarget);

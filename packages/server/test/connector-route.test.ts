@@ -29,6 +29,7 @@ import {
 } from '../src/connector/identity.ts';
 import { snapshotPath } from '../src/connector/snapshot.ts';
 import { handleMcpConnectorRoute } from '../src/routes/mcp-connector.ts';
+import { matchRow } from '../src/routes/row-dispatch.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import {
   type Send,
@@ -39,6 +40,7 @@ import {
   openStream,
   rpc,
 } from './connector-harness.ts';
+import { rowAt } from './route-row.ts';
 import { waitFor } from './wait-for.ts';
 import { seedBoard } from './workspace-seed.ts';
 
@@ -76,7 +78,7 @@ describe('/mcp gate', () => {
   ) =>
     handleMcpConnectorRoute(ctx(opts.address ?? '127.0.0.1'), {
       req: new Request('http://127.0.0.1/mcp', { method: 'POST', headers }),
-      pathname: '/mcp',
+      row: rowAt('mcp-connector.ts', '/mcp'),
       visitor: opts.visitor ?? null,
     });
   const bearer = (agentId: string) => ({ authorization: `Bearer ${mintAgentToken(agentId, KEY)}` });
@@ -160,13 +162,10 @@ describe('/mcp gate', () => {
     });
   });
 
-  it('declines every other path', async () => {
-    const res = await handleMcpConnectorRoute(ctx('127.0.0.1'), {
-      req: new Request('http://127.0.0.1/mcp/extra'),
-      pathname: '/mcp/extra',
-      visitor: null,
-    });
-    expect(res).toBeNull();
+  it('has no row for any other path, so the router never hands it one', () => {
+    expect(matchRow('mcp-connector.ts', '/mcp/extra')).toBeNull();
+    expect(matchRow('mcp-connector.ts', '/mcp/')).toBeNull();
+    expect(matchRow('mcp-connector.ts', '/mcp')?.pattern).toBe('/mcp');
   });
 });
 

@@ -17,6 +17,7 @@
  */
 import { signInRequiredBody } from '../middleware/write-gate.ts';
 import type { VoiceBoard } from '../voice-agent-list.ts';
+import { type RouteRow, rowHandlers } from './row-dispatch.ts';
 
 export interface VoicePageRoutesContext {
   agents: () => VoiceBoard[];
@@ -30,7 +31,8 @@ export interface VoicePageRoutesContext {
 
 export interface VoicePageRouteRequest {
   req: Request;
-  pathname: string;
+  /** The route-table row the router matched. */
+  row: RouteRow;
   /** Truthy for a share or collaboration visitor. */
   visitor: unknown;
   ownerProven: () => boolean;
@@ -40,10 +42,6 @@ export interface VoicePageRouteRequest {
    *  converse socket's own read-only test (`upgrade-stream.ts`). */
   mustSignIn: () => boolean;
 }
-
-const PAGE = '/voice';
-const LIST = '/api/voice/agents';
-const STREAM = '/api/voice/events:stream';
 
 /** Null when the caller is the owner, else the refusal. */
 export function refuseNonOwner(
@@ -63,13 +61,27 @@ export function handleVoicePageRoutes(
   ctx: VoicePageRoutesContext,
   rq: VoicePageRouteRequest,
 ): Response | null {
-  if (rq.pathname !== PAGE && rq.pathname !== LIST && rq.pathname !== STREAM) return null;
-  if (rq.req.method !== 'GET') return ctx.j(405, { error: 'method not allowed' });
-  if (rq.pathname === STREAM) return refuseNonOwner(ctx, rq) ?? ctx.stream();
-  if (rq.pathname === LIST) {
-    const denied = refuseNonOwner(ctx, rq);
-    return denied ?? ctx.j(200, { boards: ctx.agents() });
-  }
+  return ROWS(ctx, rq);
+}
+
+type Ctx = VoicePageRoutesContext;
+type Rq = VoicePageRouteRequest;
+
+/** Each row answers GET alone. */
+const getOnly =
+  (row: (ctx: Ctx, rq: Rq) => Response | null) =>
+  (ctx: Ctx, rq: Rq): Response | null =>
+    rq.req.method !== 'GET' ? ctx.j(405, { error: 'method not allowed' }) : row(ctx, rq);
+
+const ROWS = rowHandlers<Ctx, Rq, Response | null>('voice-page.ts', {
+  '/voice': getOnly(page),
+  '/api/voice/agents': getOnly(
+    (ctx, rq) => refuseNonOwner(ctx, rq) ?? ctx.j(200, { boards: ctx.agents() }),
+  ),
+  '/api/voice/events:stream': getOnly((ctx, rq) => refuseNonOwner(ctx, rq) ?? ctx.stream()),
+});
+
+function page(ctx: Ctx, rq: Rq): Response | null {
   // The shell holds nothing but markup, so a browser that has not signed in
   // yet gets it and is told by the list's 401; under access-only there is no
   // sign-in page to send it to. A visitor and a proven non-owner get nothing.
