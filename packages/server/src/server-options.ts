@@ -833,8 +833,18 @@ export interface ServerOptions {
    * `both` or `better-auth` the server runs Better Auth on `origin` — the one
    * https address people sign in at — with the shared Google client, and
    * with email and password beside it when `password` is given.
+   * `localOnly` and `extraAccounts` are the local test sign-in's
+   * (`auth/test-signin.ts`): an http `*.localhost` origin, no request through
+   * Cloudflare, and the test people allowed an account.
    */
-  signIn?: { mode: SignInMode; origin: string; google: GoogleClient; password?: PasswordSignIn };
+  signIn?: {
+    mode: SignInMode;
+    origin: string;
+    google: GoogleClient;
+    password?: PasswordSignIn;
+    localOnly?: boolean;
+    extraAccounts?: readonly string[];
+  };
   /**
    * Cloudflare Access share machinery. When set, the server exposes
    * /api/share routes for creating/listing/revoking shares, instantiates

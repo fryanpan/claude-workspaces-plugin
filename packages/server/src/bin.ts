@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readDiscovery } from '@claude-workspaces/core/discovery-file';
 import { parseImportBoards } from '../../../infra/project-machine/board-import-store.ts';
+import { startTestGoogle, testSignInOptions } from './auth/test-signin.ts';
 import { MISSING_DATA_DIR, dataDirFromArgs } from './data-dir.ts';
 import { enableDatalessMaterialization } from './dataless-policy.ts';
 import { confirmDeployBoot, deployLogPath } from './deploy-log.ts';
@@ -111,6 +112,7 @@ const {
   trustedHosts,
   cfAccess,
   signIn,
+  testSignIn,
   accessTunnelHosts,
   accessTunnelReady,
   proxiedTrustedHosts,
@@ -269,6 +271,11 @@ if (
   process.exit(2);
 }
 
+// The local test sign-in replaces the operator lists and the sign-in it
+// would otherwise run: Alice and Bob through a fake Google on loopback.
+const testGoogle = testSignIn ? startTestGoogle(testSignIn) : null;
+const testOpts =
+  testSignIn && testGoogle ? testSignInOptions(testSignIn, testGoogle.endpoints) : null;
 let port = requestedPort;
 while (!handle) {
   try {
@@ -288,6 +295,7 @@ while (!handle) {
       ...(recallCallbackHost ? { recallCallbackHost } : {}),
       ...(calendarBot ? { calendarBot } : {}),
       proxiedTrustedEmails,
+      ...(testOpts ?? {}),
       ...(homeRemotesConfig ? { homeRemotes: { config: homeRemotesConfig } } : {}),
       ...(homeFeedClientId ? { homeFeedClientId } : {}),
       ...(googleMapsKey ? { googleMapsKey } : {}),
@@ -328,7 +336,7 @@ while (!handle) {
       // …and the environment it runs in, the same string the server stamps.
       ...(sentryDsn ? { sentryEnvironment } : {}),
       cfAccess,
-      ...(signIn ? { signIn } : {}),
+      ...(signIn && !testOpts ? { signIn } : {}),
       // The share hostname and the audience of the ONE Access application in
       // front of it. Passed only when BOTH resolved: `resolveServerConfig`
       // already said loudly why it refused, and handing the list over without
@@ -464,6 +472,11 @@ if (proxiedTrustedHosts.length && proxiedTrustedReady) {
   console.log(
     `[feedback]   operator:   ${proxiedTrustedHosts.join(', ')} (via Cloudflare Access, full product, ` +
       `${proxiedTrustedEmails.length} allowed ${proxiedTrustedEmails.length === 1 ? 'email' : 'emails'})`,
+  );
+}
+if (testSignIn) {
+  console.log(
+    `[feedback]   test sign-in: ${testSignIn.origin} (Alice is the owner; Bob reaches what is shared with him)`,
   );
 }
 if (allowedOrigins.length) console.log(`[feedback]   origins:    ${allowedOrigins.join(', ')}`);

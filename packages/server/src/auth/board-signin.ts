@@ -100,6 +100,12 @@ export interface BoardSignInOptions {
   onSessionCreated?: (person: { email: string; emailVerified: boolean }) => void;
   /** Email and password beside Google (`board-signin-password.ts`), or absent. */
   password?: PasswordSignIn;
+  /**
+   * The local test sign-in (`test-signin.ts`): the origin may be http on a
+   * `*.localhost` name, and a request carrying `cf-ray` is refused every
+   * sign-in route and signs nobody in.
+   */
+  localOnly?: boolean;
 }
 
 /** Who a request's sign-in cookie names, when it names anyone. */
@@ -118,6 +124,8 @@ export interface BoardSignIn {
   origin: string;
   /** The bare lower-case hostname of `origin`. */
   host: string;
+  /** The local test sign-in: reached from this machine only. */
+  localOnly?: boolean;
   /**
    * Answer a request on one of the sign-in paths, or null when the path is
    * not one of them. Called before admission, so only paths that must work
@@ -212,10 +220,14 @@ export function ownRateLimitStore(now: () => number = Date.now) {
 /** Build this machine's sign-in. The tables are made on first use. */
 export function createBoardSignIn(opts: BoardSignInOptions): BoardSignIn {
   const origin = new URL(opts.origin).origin;
-  if (!origin.startsWith('https://')) {
+  const host = new URL(origin).hostname;
+  const localOnly = opts.localOnly === true;
+  const localHttp = localOnly && origin.startsWith('http://') && host.endsWith('.localhost');
+  if (!origin.startsWith('https://') && !localHttp) {
     throw new Error(`sign-in origin must be https (got ${origin})`);
   }
-  const host = new URL(origin).hostname;
+  /** Came through Cloudflare: never the local test sign-in's to answer. */
+  const proxiedToLocal = (req: Request) => localOnly && req.headers.has('cf-ray');
   const db = openUserList(opts.dataDir);
   const password = opts.password;
   const throttle = createLinkThrottle(password?.linkLimits);
@@ -259,6 +271,7 @@ export function createBoardSignIn(opts: BoardSignInOptions): BoardSignIn {
   };
 
   const handle = async (req: Request, pathname: string): Promise<Response | null> => {
+    if (proxiedToLocal(req)) return refuse(403, 'test_signin_local_only');
     if (pathname === SIGNIN_PAGE_PATH && req.method === 'GET') {
       return signInPage(new URL(req.url).searchParams, password?.turnstile.siteKey ?? null);
     }
@@ -319,7 +332,7 @@ export function createBoardSignIn(opts: BoardSignInOptions): BoardSignIn {
 
   const personOf = async (req: Request): Promise<SignedInPerson | null> => {
     const cookie = req.headers.get('cookie');
-    if (!cookie?.includes(SIGNIN_COOKIE_PREFIX)) return null;
+    if (!cookie?.includes(SIGNIN_COOKIE_PREFIX) || proxiedToLocal(req)) return null;
     const auth = await ready;
     const found = await auth.api.getSession({ headers: new Headers({ cookie }) }).catch(() => null);
     if (!found) return null;
@@ -342,7 +355,7 @@ export function createBoardSignIn(opts: BoardSignInOptions): BoardSignIn {
     db.close();
   };
 
-  return { origin, host, handle, personOf, close };
+  return { origin, host, localOnly, handle, personOf, close };
 }
 
 function withJson(headers: Headers): Headers {

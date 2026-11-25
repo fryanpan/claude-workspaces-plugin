@@ -53,7 +53,14 @@ export interface AccessDepsOptions {
   recallCallbackHost?: string;
   /** `CW_SIGNIN` and what Better Auth needs (`middleware/signin-door.ts`).
    *  Absent is `access`: today's Cloudflare Access sign-in, unchanged. */
-  signIn?: { mode: SignInMode; origin: string; google: GoogleClient; password?: PasswordSignIn };
+  signIn?: {
+    mode: SignInMode;
+    origin: string;
+    google: GoogleClient;
+    password?: PasswordSignIn;
+    localOnly?: boolean;
+    extraAccounts?: readonly string[];
+  };
 }
 
 export interface AccessDepsContext {
@@ -247,7 +254,10 @@ export function createAccessDeps(ctx: AccessDepsContext) {
           origin: opts.signIn.origin,
           google: opts.signIn.google,
           ...(opts.signIn.password ? { password: opts.signIn.password } : {}),
-          mayHaveAccount: (email, verified) => ctx.mayHaveAccount?.(email, verified) ?? false,
+          ...(opts.signIn.localOnly ? { localOnly: true } : {}),
+          mayHaveAccount: (email, verified) =>
+            (verified && (opts.signIn?.extraAccounts ?? []).includes(email)) ||
+            (ctx.mayHaveAccount?.(email, verified) ?? false),
           onSessionCreated: (p) => recordOwner(p.email, p.emailVerified),
         })
       : null;
