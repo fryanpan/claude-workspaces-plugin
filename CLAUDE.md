@@ -176,8 +176,8 @@ job — fails if ci.yml gains a gate that is not a member, in ANY of its jobs.
 That is what keeps this paragraph true.
 
 CI is eight jobs (`gates`, `gates-build`, `client` in five shards,
-`client-browser` in fourteen, `server` in two, the core-mode twins
-`server-core` in two and `client-browser-core` in seven — every test board on
+`client-browser` in fourteen, `server` in three, the core-mode twins
+`server-core` in three and `client-browser-core` in thirteen — every test board on
 the collab core, `scripts/server-core-mode.ts` — and `ci`, the one required
 check, which also runs the coverage ratchet) so that a verdict takes
 about two minutes rather than eleven; `bun run verify` is
@@ -185,7 +185,7 @@ still one sequential run, because this machine hosts several agents at once.
 Its last three members are a chain — both suites run under coverage
 instrumentation and `coverage` ratchets what they left in `.coverage/`, so
 neither suite runs twice. `bun run test:server` splits the server suite across
-four processes for the same reason CI splits each half across eight: it is two-thirds
+four processes for the same reason CI splits each third across eight: it is two-thirds
 idle. Pass `--jobs 1` for the old one-process behaviour.
 
 Every member's output goes straight to your terminal in full; the summary at

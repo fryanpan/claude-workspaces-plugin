@@ -83,8 +83,9 @@ name: CI
 # THE JOB BUDGET IS 40. The account runs at most 40 jobs at once: two runs
 # that overlapped on 25 Nov peaked at exactly 40 running, and 24 of the
 # second run's jobs waited about 60s for a runner. The parallel jobs here
-# total 40 (2 gates + 5 + 14 + 3 + 3 + 13), so one run on its own never
-# queues. A 41st job queues behind the first one to finish, roughly a minute
+# total 40 (2 gates + 5 + 14 + 3 + 3 + 13), so a PR run on its own never
+# queues. A push to main can also start release.yml, fly.yml or
+# cloudflare.yml, whose jobs count against the same 40. A 41st job queues behind the first one to finish, roughly a minute
 # on every verdict, so a new shard needs one taken from somewhere else.
 # That is why `client-browser-core` has 13 shards and not 14.
 #
@@ -122,11 +123,11 @@ jobs:
           # between Bun releases. Bump this deliberately, alongside a rebuild.
           bun-version: 1.3.10
       # Normally 3-5s. One run's install hung for 300s with no limit
-      # (25 Nov), so each attempt gets 60s and one retry; the step's own
-      # timeout is the backstop if `timeout` itself cannot end it.
+      # (25 Nov), so each attempt gets 60s (then SIGKILL after 5 more) and one
+      # retry; the step's own timeout is the backstop.
       - name: Install dependencies
         timeout-minutes: 3
-        run: timeout 60 bun install --frozen-lockfile || timeout 60 bun install --frozen-lockfile
+        run: timeout -k 5 60 bun install --frozen-lockfile || timeout -k 5 60 bun install --frozen-lockfile
       # THIS STEP IS WHY THE LISTS BELOW CAN BE TRUSTED. `bun run verify` is the
       # one command CLAUDE.md tells a builder to run before pushing, and its
       # member list lives in scripts/verify.ts. This asserts that every
@@ -225,7 +226,7 @@ jobs:
           bun-version: 1.3.10
       - name: Install dependencies
         timeout-minutes: 3
-        run: timeout 60 bun install --frozen-lockfile || timeout 60 bun install --frozen-lockfile
+        run: timeout -k 5 60 bun install --frozen-lockfile || timeout -k 5 60 bun install --frozen-lockfile
       - name: Leak gate can still see
         run: bun run check:scrub-gate
       # The Cloudflare Terraform config (infra/cloudflare): fmt, validate
@@ -333,7 +334,7 @@ jobs:
           bun-version: 1.3.10
       - name: Install dependencies
         timeout-minutes: 3
-        run: timeout 60 bun install --frozen-lockfile || timeout 60 bun install --frozen-lockfile
+        run: timeout -k 5 60 bun install --frozen-lockfile || timeout -k 5 60 bun install --frozen-lockfile
       - name: Test (client + unit)
         # No CW_BROWSER_TESTS here: it is read only by chromeForSuite(), and
         # a file that calls chromeForSuite() is a browser file by definition,
@@ -372,7 +373,7 @@ jobs:
           bun-version: 1.3.10
       - name: Install dependencies
         timeout-minutes: 3
-        run: timeout 60 bun install --frozen-lockfile || timeout 60 bun install --frozen-lockfile
+        run: timeout -k 5 60 bun install --frozen-lockfile || timeout -k 5 60 bun install --frozen-lockfile
       - name: Test (browser)
         # The same pair the gates job's client-boot step sets, and for the same
         # reason: these files launch the runner's own Chrome, and a container
@@ -393,7 +394,7 @@ jobs:
           path: .coverage/vitest/lcov.info
           if-no-files-found: error
 
-  # The server suite, in two runners, each across processes.
+  # The server suite, in three runners, each across processes.
   #
   # The opposite shape to the client suite: 61 seconds of CPU inside 175 of
   # wall clock, because most of it is waiting on debounce timers, fs.watch and
@@ -402,7 +403,7 @@ jobs:
   # two cores' worth of CPU.
   #
   # One runner was enough at 412 files. At 1,300 the eight processes were busy
-  # end to end (933s of chunk time inside 120s), so it is two runners now,
+  # end to end (933s of chunk time inside 120s), so it became two runners,
   # each taking half of the same interleaved list (`--shard`).
   #
   # Half by measured time, not every other file (2026-11-18). Twelve green
@@ -414,8 +415,8 @@ jobs:
   # `bun run scripts/server-durations.ts <run-id>...`. Three shards were
   # replayed then too, and bought under a second, because the slowest browser
   # shard was the path. Once `client-browser-core` was split further (25 Nov),
-  # `server` at 103-112s was the path, so it is three shards now: 344
-  # weighted seconds each on the refreshed table, against 516 at two.
+  # `server` at 103-112s was the path, so it is three shards now: 376
+  # weighted seconds each on the refreshed table, against 564 at two.
   server:
     runs-on: ubuntu-latest
     permissions:
@@ -432,7 +433,7 @@ jobs:
           bun-version: 1.3.10
       - name: Install dependencies
         timeout-minutes: 3
-        run: timeout 60 bun install --frozen-lockfile || timeout 60 bun install --frozen-lockfile
+        run: timeout -k 5 60 bun install --frozen-lockfile || timeout -k 5 60 bun install --frozen-lockfile
       - name: Test (server)
         run: |
           bun run test:server --shard ${{ matrix.shard }}/${{ strategy.job-total }} --jobs 8 \
@@ -466,7 +467,7 @@ jobs:
           bun-version: 1.3.10
       - name: Install dependencies
         timeout-minutes: 3
-        run: timeout 60 bun install --frozen-lockfile || timeout 60 bun install --frozen-lockfile
+        run: timeout -k 5 60 bun install --frozen-lockfile || timeout -k 5 60 bun install --frozen-lockfile
       - name: Test (server, every board on the collab core)
         run: bun run test:server --core --shard ${{ matrix.shard }}/${{ strategy.job-total }} --jobs 8
 
@@ -477,7 +478,7 @@ jobs:
   # (110-128s). It has 13 shards, one fewer than `client-browser`, so that the
   # run fits the 40-job budget described at the top of this file. Replayed on
   # the refreshed table, the slowest shard is 91 case-seconds per worker at 13
-  # against 84 at 14.
+  # against 85 at 14.
   client-browser-core:
     runs-on: ubuntu-latest
     permissions:
@@ -493,7 +494,7 @@ jobs:
           bun-version: 1.3.10
       - name: Install dependencies
         timeout-minutes: 3
-        run: timeout 60 bun install --frozen-lockfile || timeout 60 bun install --frozen-lockfile
+        run: timeout -k 5 60 bun install --frozen-lockfile || timeout -k 5 60 bun install --frozen-lockfile
       - name: Test (browser, every board on the collab core)
         env:
           CW_CHROME_ARGS: --no-sandbox --disable-dev-shm-usage
