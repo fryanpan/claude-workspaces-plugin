@@ -26,6 +26,18 @@ export function birthOf(st: { birthtimeMs: number }): { createdMs?: number } {
   return st.birthtimeMs > 0 ? { createdMs: st.birthtimeMs } : {};
 }
 
+/**
+ * When a board doc was made: the EARLIER of its record and its file's birth.
+ * Each clock alone reads late. A `git pull` that changes a file writes a new
+ * one, so the birth moves with every edit that arrives that way (which is
+ * how Recently Created came to read as Recently Modified); and opening an
+ * old project file from the Library, or attaching it, makes the record now.
+ * An agent's doc counts as made as much as a person's.
+ */
+export function madeAt(recordAt: number, fileBirth: number | undefined): number {
+  return fileBirth === undefined ? recordAt : Math.min(recordAt, fileBirth);
+}
+
 /** How long one repo walk is reused. A Library load is a page view, and a
  *  person flipping between the page and a doc should not re-walk the repo. */
 const SCAN_TTL_MS = 10_000;

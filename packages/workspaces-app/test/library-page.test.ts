@@ -432,10 +432,10 @@ describe('the Library on the board', () => {
   });
 
   /** This device last picked Recently Modified. */
-  const createdTab = { storage: { 'cw-library-recent-tab': 'modified' } };
+  const modifiedTab = { storage: { 'cw-library-recent-tab': 'modified' } };
 
   it('the nav item goes to the Library and back to Tasks, each with an address', async () => {
-    const board = await bootTestBoard(createdTab);
+    const board = await bootTestBoard(modifiedTab);
     expect(showing('board-library')).toBe(false);
     await click(document.querySelector('[data-nav=library]') as HTMLElement);
     await settle();
@@ -457,7 +457,7 @@ describe('the Library on the board', () => {
   };
 
   it('an open Library redraws a meeting filed elsewhere, on the list it shows', async () => {
-    await bootTestBoard({ url: `https://board.test/workspaces/${WS}/library`, ...createdTab });
+    await bootTestBoard({ url: `https://board.test/workspaces/${WS}/library`, ...modifiedTab });
     await settle();
     await click(el('board-library').querySelector('.library-more[data-list=files]') as HTMLElement);
     expect(el('board-library').querySelector('h2')?.textContent).toBe('All files');

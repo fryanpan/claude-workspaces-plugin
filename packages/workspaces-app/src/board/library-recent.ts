@@ -163,7 +163,10 @@ function clockPanelHtml(
     .map((e) => entryHtml(e, clock))
     .join('');
   const head = clock === 'created' ? 'Created' : 'Modified';
-  const empty = clock === 'created' ? 'Nothing made on this board yet.' : 'No files yet.';
+  const empty =
+    clock === 'created'
+      ? 'No board docs yet. Project files are under Recently Modified.'
+      : 'No files yet.';
   return `${fixedTable(head, shown, empty)}${more}`;
 }
 

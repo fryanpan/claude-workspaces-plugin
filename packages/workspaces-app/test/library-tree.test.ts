@@ -119,7 +119,7 @@ function drive() {
     here: (list, place) => libraryHref(`https://board.test/workspaces/${WS}/library`, list, place),
     now: () => NOW,
     toast: (msg, action) => toasts.push({ msg, run: action?.run }),
-    // Recently Created showing, the tab these cases file docs from.
+    // Recently Modified showing, the tab these cases file docs from.
     storage: fakeStorage({ 'cw-library-recent-tab': 'modified' }),
   });
   return { page, root, board, toasts };

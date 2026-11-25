@@ -258,6 +258,7 @@ function sourcesFor(
     // every doc on the board to draw a list of them is the wrong price for a
     // page view.
     fileMtime: (docId) => statOf(docId)?.mtimeMs,
+    fileBirth: (docId) => birthOf(statOf(docId) ?? { birthtimeMs: 0 }).createdMs,
     projectRoot: (repoKey) => (hidden(repoKey) ? null : mounts.rootFor(repoKey)),
     // The project's own git listing is a SECOND way a hidden folder's names
     // could leave: a markdown file under a local-only mount is listed by

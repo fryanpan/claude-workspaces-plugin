@@ -5,7 +5,7 @@ import { attachmentIdOf, isAttachmentMember } from '@claude-workspaces/core';
 import { isReservedDocId } from './doc-ids.ts';
 import { makeDocKey, parseDocKey } from './doc-key.ts';
 import { type FolderState, type FolderView, folderOfDoc, liveFolders } from './library-folders.ts';
-import type { ProjectFile } from './library-lister.ts';
+import { type ProjectFile, madeAt } from './library-lister.ts';
 import {
   type LibraryWhere,
   type Placed,
@@ -138,6 +138,8 @@ export interface LibrarySources {
    * ways in one column.
    */
   fileMtime: (docId: string) => number | undefined;
+  /** When the file this doc is bound to was born on disk, if known. */
+  fileBirth?: (docId: string) => number | undefined;
   /** What `where` is built from; absent, no `where` is built. */
   placing?: Omit<PlacingContext, 'projectRepoKey' | 'projectVisible'>;
   /** The checkout a project's files are read from, or null when none is left. */
@@ -399,20 +401,20 @@ export function buildLibrary(src: LibrarySources): LibraryPayload {
       continue;
     }
     // The Files list's one clock, for a bound doc exactly as for a loose
-    // file: the bytes' own mtime.
+    // file: the bytes' own mtime. A whiteboard never has a file — it is its
+    // record alone — so its own last activity is its one clock. Any other
+    // doc whose file cannot be read keeps no reading rather than a stand-in.
     const fileRow: DocFileRow = {
       repoKey: parsed?.repoKey,
       relPath: keyRel,
       docId: meta.docId,
       title,
       href,
-      at: src.fileMtime(meta.docId),
-      // When the board made the record, never the bytes' birth time: a
-      // `git pull` that changes a file writes a new one, so its birth moved
-      // with every edit that arrived that way, and Recently Created read as
-      // Recently Modified. An agent's doc counts as created as much as a
-      // person's.
-      created: meta.createdAt,
+      at:
+        meta.type === 'whiteboard'
+          ? (meta.lastActivityAt ?? meta.createdAt)
+          : src.fileMtime(meta.docId),
+      created: madeAt(meta.createdAt, src.fileBirth?.(meta.docId)),
     };
     docFiles.push(fileRow);
     const kind = meta.type === 'mockup' || meta.type === 'whiteboard' ? 'mockups' : 'documents';

@@ -245,17 +245,42 @@ describe('buildLibrary', () => {
     ]);
   });
 
-  it('dates a board doc as created when the board made it, never by its file’s birth', () => {
+  it('dates a board doc as created at the EARLIER of its record and its file’s birth', () => {
     // A `git pull` that changes a file writes a new one, so the bytes' birth
-    // time moves with every edit that arrives that way. The record does not.
+    // moves with every edit that arrives that way: the record is earlier.
+    // Opening a year-old file from the Library makes its record now: the
+    // birth is earlier. Either way the later clock is not when it was made.
     const lib = buildLibrary(
       sources({
-        docs: [meta('d-plan', { title: 'Saltmarsh plan', createdAt: 1_000 })],
-        fileMtime: () => 9_000,
+        docs: [
+          meta('d-pulled', { title: 'Saltmarsh plan', createdAt: 1_000 }),
+          meta('d-opened', { title: 'Harborlight readme', createdAt: 9_000 }),
+        ],
+        docKeyOf: (id) => makeDocKey(REPO, `docs/${id}.md`),
+        projectRoot: () => null,
+        fileMtime: () => 9_500,
+        fileBirth: (id) => (id === 'd-pulled' ? 9_000 : 2_000),
       }),
     );
-    expect(lib.files.map((r) => [r.name, r.at, r.created])).toEqual([
-      ['Saltmarsh plan', 9_000, 1_000],
+    expect(lib.files.map((r) => [r.name, r.created]).sort()).toEqual([
+      ['Harborlight readme', 2_000],
+      ['Saltmarsh plan', 1_000],
+    ]);
+  });
+
+  it('gives a whiteboard, which has no file, its own last activity as its modified clock', () => {
+    // A whiteboard lives in its record alone: no bytes to stat.
+    const lib = buildLibrary(
+      sources({
+        docs: [
+          meta('d-board', { title: 'Quay layout', type: 'whiteboard', lastActivityAt: 7_000 }),
+          meta('d-fresh', { title: 'Tide chart', type: 'whiteboard', createdAt: 3_000 }),
+        ],
+      }),
+    );
+    expect(lib.files.map((r) => [r.name, r.at])).toEqual([
+      ['Quay layout', 7_000],
+      ['Tide chart', 3_000],
     ]);
   });
 
