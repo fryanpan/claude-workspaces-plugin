@@ -81,6 +81,13 @@ describe('thread writes follow the member’s access level', () => {
     expect(handle.shareLinks.setMemberRole(board, email, 'member', access)).toBe(true);
   };
 
+  /** The level's refusal (`view_only` / `comment_only`), or null. */
+  const levelRefusal = async (email: string, path: string, body: unknown) => {
+    const res = await postAsMember(email, path, body);
+    const error = ((await res.json().catch(() => ({}))) as { error?: string }).error;
+    return error === 'view_only' || error === 'comment_only' ? error : null;
+  };
+
   const newThread = (email: string, text: string) =>
     postAsMember(email, `/workspaces/${board}/docs/${docId}/threads`, {
       author: { id: 'ignored', name: 'Ignored', kind: 'person' },
@@ -175,7 +182,7 @@ describe('thread writes follow the member’s access level', () => {
     expect(refused.status).toBe(403);
     expect(((await refused.json()) as { error: string }).error).toBe('comment_only');
     // Control: the editor's same request is not refused by the level.
-    expect((await postAsMember(EDITOR, path, rewrite)).status).not.toBe(403);
+    expect(await levelRefusal(EDITOR, path, rewrite)).toBeNull();
   });
 
   it('refuses a view or comment member’s answer to a suggestion', async () => {
@@ -186,11 +193,79 @@ describe('thread writes follow the member’s access level', () => {
     expect((await postAsMember(EDITOR, path, { action: 'reject' })).status).toBe(200);
   });
 
+  it('lets a view member read the threads', async () => {
+    const res = await req(`/workspaces/${board}/docs/${docId}/threads`, SHARE_HOST, {
+      headers: { ...CF_RAY, 'cf-access-jwt-assertion': await signJwt(SHARE_AUD, VIEWER) },
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
+  });
+
+  it('refuses a view member every other thread write: by_find, edit-comment, linked items, promote', async () => {
+    const opened = await newThread(COMMENTER, 'a thread to promote');
+    expect(opened.status).toBe(200);
+    const thread = ((await opened.json()) as { thread: { id: string; comments: { id: string }[] } })
+      .thread;
+    const at = `/workspaces/${board}/docs/${docId}/threads`;
+    const author = { id: 'ignored', name: 'Ignored', kind: 'person' };
+    const writes: Array<[string, unknown]> = [
+      [`${at}/by_find`, { author, text: 'by find', find: 'Body' }],
+      [`${at}/${thread.id}/edit-comment`, { author, commentId: thread.comments[0]?.id, text: 'x' }],
+      [`${at}/${thread.id}/linked-items`, { author, item: {} }],
+      [`${at}/${thread.id}/promote`, { title: 'Saltmarsh' }],
+    ];
+    for (const [path, body] of writes) {
+      const res = await postAsMember(VIEWER, path, body);
+      expect(res.status, path).toBe(403);
+      expect(((await res.json()) as { error: string }).error, path).toBe('view_only');
+    }
+    expect(threadTexts()).not.toContain('by find');
+    // Control: the commenter is not refused by the level on the same writes
+    // (a share visitor's linked item is refused for its own reason).
+    for (const [path, body] of writes) {
+      expect(await levelRefusal(COMMENTER, path, body), path).toBeNull();
+    }
+    expect(threadTexts()).toContain('by find');
+  });
+
+  it('refuses a view or comment member every write to the doc’s text', async () => {
+    const opened = await newThread(COMMENTER, 'a thread to insert after');
+    const threadId = ((await opened.json()) as { thread: { id: string } }).thread.id;
+    const doc = `/workspaces/${board}/docs/${docId}`;
+    const writes: Array<[string, unknown]> = [
+      [`${doc}/threads/${threadId}/insert_after`, { text: 'Inserted.' }],
+      [`${doc}/threads/${threadId}/insert_blocks_after`, { markdown: 'Inserted.' }],
+      [`${doc}/find_and_replace`, { find: 'Body.', replace: 'Replaced.' }],
+      [`${doc}/content`, { markdown: '# Replaced\n', confirmOverwriteHumanEdits: true }],
+      [`${doc}/block_edits`, { edits: [] }],
+      [`${doc}/delete_section`, { heading: 'Riverbend notes' }],
+      [`${doc}/agent_anchors`, { find: 'Body.' }],
+      [`${doc}/suggestions/s-none/accept`, {}],
+    ];
+    for (const who of [VIEWER, COMMENTER]) {
+      for (const [path, body] of writes) {
+        expect((await postAsMember(who, path, body)).status, `${who} ${path}`).toBe(403);
+      }
+    }
+    expect(handle.docStore.readMarkdownBody(docId) ?? '').toContain('Body.');
+    // Control: the level refuses the editor none of them. (A share visitor's
+    // text edits meet the share scope's own refusal after this one.)
+    for (const [path, body] of writes) {
+      expect(await levelRefusal(EDITOR, path, body), path).toBeNull();
+    }
+  });
+
   it('report-only: the owner’s opt-out lets a view member’s thread through', async () => {
     handle.shareLinks.setRolesMode(board, 'report-only');
     try {
       const res = await newThread(VIEWER, 'viewer under report-only');
       expect(res.status, await res.clone().text()).toBe(200);
+      const text = await postAsMember(
+        VIEWER,
+        `/workspaces/${board}/docs/${docId}/find_and_replace`,
+        { find: 'Body', replace: 'Body' },
+      );
+      const error = ((await text.json()) as { error?: string }).error ?? null;
+      expect(error).not.toBe('view_only');
     } finally {
       handle.shareLinks.setRolesMode(board, 'enforce');
     }

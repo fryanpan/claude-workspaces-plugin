@@ -339,16 +339,6 @@ export async function handleDocThreadRoutes(
       via,
     );
   };
-  // A member's access level, before any write on a thread. Every POST here
-  // writes the threads, which `comment` grants; the three that write the
-  // doc's text from a thread's region take `edit`. GETs are a read.
-  if (req.method !== 'GET' && (rest === 'threads' || rest.startsWith('threads/'))) {
-    const need = /^threads\/[^/]+\/(rewrite_region|insert_after|insert_blocks_after)$/.test(rest)
-      ? 'edit'
-      : 'comment';
-    const short = rq.refuseBelow(measurementBoard() ?? '', need);
-    if (short) return short;
-  }
   const threadIdMatch = rest.match(/^threads\/([^/]+)(\/.*)?$/);
   if (threadIdMatch) {
     const threadId = decodeURIComponent(threadIdMatch[1] ?? '');
