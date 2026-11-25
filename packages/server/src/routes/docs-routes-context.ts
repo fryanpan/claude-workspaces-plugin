@@ -315,6 +315,9 @@ export interface DocRouteRequest {
    * case a `!visitor` shortcut would get wrong.
    */
   roleFor: (workspaceId: string) => BoardRole;
+  /** The 403 for a member below `need` on this board, or `null` (the
+   *  admission gate's `refuseBelow`). */
+  refuseBelow: (workspaceId: string, need: 'comment' | 'edit') => Response | null;
   /** The doc meta a REST reply carries — redacted when the caller is a share
    *  visitor, which is why it is per-request rather than per-server. */
   metaFor: <T extends DocMeta>(meta: T) => Record<string, unknown>;

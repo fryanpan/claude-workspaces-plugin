@@ -331,6 +331,13 @@ export async function handleDocEditRoutes(
   if (rest === 'suggestions' && req.method === 'GET') {
     return j(200, { suggestions: docStore.docSuggests.listSuggestions(docId) });
   }
+  // Accepting or rejecting a proposal changes the doc's text: an editor's
+  // act, never a viewer's or a commenter's.
+  if (rest.startsWith('suggestions/') && req.method === 'POST') {
+    const board = rq.scope?.workspaceId ?? ctx.resolveWorkspaceForDoc(docId) ?? '';
+    const short = rq.refuseBelow(board, 'edit');
+    if (short) return short;
+  }
   if (rest === 'suggestions/resolve_all' && req.method === 'POST') {
     const body = sent<ResolveAllSuggestionsBody>(await safeJson(req));
     const action = body?.action as 'accept' | 'reject' | undefined;
