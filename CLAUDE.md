@@ -208,7 +208,8 @@ command named per bar.
 `bunx biome check --write` fixes formatting; `any` and unused imports are
 lint errors, at zero today. Per diff: `packages/plugin/**` → version bump
 (below); `packages/mcp/src/**` needs no extra step of yours — the
-`check:mcp-bundle` member rebuilds the bundle and fails until you commit it.
+`check:mcp-bundle` member rebuilds the relay bundle and fails until you
+commit it, and a rebuilt `packages/plugin/mcp/relay.js` is a plugin diff.
 
 ## Releasing the plugin
 
@@ -220,9 +221,10 @@ The full delivery model is [docs/process/delivery.md](docs/process/delivery.md)
   `.claude-plugin/marketplace.json`, then `bun run build:mcp`. The relay's
   handshake version is read from plugin.json by the launcher at start;
   launcher.test.ts asserts it through the launcher.
-- **Bump nothing when the diff touches neither `packages/plugin/**` nor
-  `packages/mcp/src/**`** — a needless bump manufactures a total merge order
-  across unrelated branches.
+- **Bump nothing when the diff does not touch `packages/plugin/**`** — a
+  needless bump manufactures a total merge order across unrelated branches.
+  A `packages/mcp/src/**` change that leaves `mcp/relay.js` unchanged ships
+  with the server (it hosts the tools at `/mcp`), not the plugin.
 - CI: `check:plugin-version` fails a plugin PR that doesn't move the version
   past origin/main, and checks other open PRs for the same number (lowest PR
   number holds it; a failed lookup SKIPS LOUDLY — read the log). Merge in

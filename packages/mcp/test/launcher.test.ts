@@ -296,6 +296,26 @@ describe('the retired full child', () => {
     expect(JSON.parse(line as string).result?.serverInfo?.name).toBeTruthy();
   });
 
+  it('fails with one line when the node relay is missing, rather than start anything', async () => {
+    // A plugin dir with no mcp/relay.js and no relay.swift: nothing can reach
+    // the board. Before the full child was retired, this fell through to it.
+    const dir = mkdtempSync(join(tmpdir(), 'cw-launcher-norelay-'));
+    mkdirSync(join(dir, 'mcp'));
+    const { code, stdout, stderr } = await run(
+      '/bin/sh',
+      [LAUNCHER, join(dir, 'mcp', 'relay.js')],
+      {
+        stdin: INITIALIZE,
+        env: { PATH: NODELESS_PATH, HOME: process.env.HOME ?? '', ...nodeRelayEnv() },
+      },
+    );
+    expect(code).toBe(64);
+    expect(stdout).toBe('');
+    const lines = stderr.trim().split('\n');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('relay.js is missing');
+  });
+
   it('is not in the plugin tree, and the registration does not name it', () => {
     expect(existsSync(OLD_BUNDLE)).toBe(false);
     expect(existsSync(RELAY)).toBe(true);

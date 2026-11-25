@@ -137,9 +137,12 @@ Do not conflate these. They fail differently and are fixed differently.
 
 **`packages/plugin/mcp/relay.js` is TRACKED.** Sessions load the node relay
 from this committed artifact (`.mcp.json` → `${CLAUDE_PLUGIN_ROOT}/mcp/relay.js`),
-not from the TypeScript under `packages/mcp/src/relay/`. A PR that edits that
-source must run `bun run build:mcp` and commit the regenerated bundle in the
-same change. CI rebuilds it and fails if the committed copy differs from a
+not from the TypeScript it is built from: `packages/mcp/src/relay/`, plus
+`packages/mcp/src/http-client.ts`, `packages/mcp/src/access-headers.ts` and
+what they import (`packages/plugin/hooks/lib/access-headers.ts` and parts of
+`packages/core`). A PR that edits any of those must run `bun run build:mcp`
+and commit the regenerated bundle in the same change; `check:mcp-bundle` says
+when it is needed. CI rebuilds it and fails if the committed copy differs from a
 fresh build, which is also why CI pins its Bun version — bundler output moves
 between releases. The tool code itself is not in any plugin bundle: the
 server hosts it at `/mcp`, so a tool change lands with a prod restart.
