@@ -2157,6 +2157,24 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   const mayCommentOnBoard = (workspaceId: string, email: string): boolean =>
     collabMemberOf(workspaceId, email) || shareLinkMemberOf(workspaceId, email);
 
+  /**
+   * Does a board member still reach this agent: it is attached to a board
+   * that is open to outside visitors and admits them (`mayCommentOnBoard`).
+   * The attachment is asked first, so no other board's membership is read.
+   * A share member's private conversation and their naming of a lead agent
+   * ask it on every request, so a removal or a board lock ends both.
+   */
+  const memberReachesAgent = (email: string | undefined, agentId: string): boolean =>
+    !!email &&
+    taskStore
+      .listWorkspaces()
+      .some(
+        (w) =>
+          taskStore.listAttachments(w.id).some((a) => a.agentId === agentId) &&
+          sharingGate.isBoardOpen(w.id) &&
+          mayCommentOnBoard(w.id, email),
+      );
+
   /** The frame-only hostname, when configured — see frame-host.ts. */
   const frameHost = opts.frameOrigin
     ? createFrameHost({
@@ -3077,6 +3095,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         attached[0];
       return pick?.id ?? null;
     },
+    memberReachesAgent,
     requestAddress: (req) => server.requestIP(req)?.address,
     agentTokenKey: agentTokenKeyFor,
     j,
@@ -3364,6 +3383,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     shareLinks,
     accessProposals,
     shareLinkBaseHost,
+    memberReachesAgent,
     collabMemberOf,
     sharingGate,
     requestAddress: (req) => server.requestIP(req)?.address,

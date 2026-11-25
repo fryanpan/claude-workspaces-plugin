@@ -44,6 +44,9 @@ export interface PrivateMessageRoutesContext {
   /** The board whose stream an agent's private messages ride, or null when
    *  it is attached nowhere. */
   boardForAgent: (agentId: string) => string | null;
+  /** Is this agent attached to an open board that admits this member? A
+   *  share member's conversation ends with their membership or a lock. */
+  memberReachesAgent: (email: string | undefined, agentId: string) => boolean;
   requestAddress: (req: Request) => string | undefined;
   agentTokenKey: () => string;
   j: (status: number, body: unknown) => Response;
@@ -94,6 +97,9 @@ async function personSide(
       error: 'no_lead_agent',
       message: 'Name your lead agent in your profile, and have it confirm you, first.',
     });
+  }
+  if (rq.visitor && !ctx.memberReachesAgent(person.email, agentId)) {
+    return j(403, { error: 'out_of_share_scope' });
   }
   if (verb === 'read') {
     const url = new URL(req.url);

@@ -14,6 +14,7 @@ import { emailIdentityId } from '@claude-workspaces/core';
 import { commentQueuePath } from '../src/agent-comment-queue.ts';
 import { agentTokenKey, mintAgentToken } from '../src/auth/agent-token.ts';
 import { mintBoardWidgetToken, widgetTokenKey } from '../src/auth/widget-token.ts';
+import { PersonAgentLinks } from '../src/person-agent-link.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { loadCookieKey } from '../src/share/link-session.ts';
 import { type Frame, listenFrames } from './doc-activity-stall-harness.ts';
@@ -245,6 +246,8 @@ describe('a share member and private messages', () => {
   const RIVERBEND = 'riverbend@harborlight.example';
   const R1 = 'agent-riverbend-r1';
   const ELSEWHERE = 'agent-saltmarsh-elsewhere';
+  const S1 = 'agent-saltmarsh-s1';
+  const OUTSIDER = 'riverbend@saltmarsh.example';
   let bobId = '';
   let s: Awaited<ReturnType<typeof startShareProofServer>>;
   let base = '';
@@ -292,6 +295,7 @@ describe('a share member and private messages', () => {
       [A1, 'Harborlight'],
       [B1, 'Riverbend'],
       [R1, 'Riverbend One'],
+      [S1, 'Saltmarsh One'],
     ] as const) {
       s.handle.tasks.attachAgent(s.board, {
         agentId,
@@ -359,15 +363,10 @@ describe('a share member and private messages', () => {
 
   const profile = (email: string, body: unknown) =>
     s.visitor(email, '/api/auth/profile', post(body));
-  const sidesOf = async (email: string) => {
-    const who = signedInPerson(s.handle, s.dataDir, base, { email });
-    const res = await fetch(`${base}/api/auth/profile`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...who.headers },
-      body: JSON.stringify({ displayName: s.handle.identities.get(who.user.id)?.displayName }),
-    });
-    return ((await res.json()) as { leadAgent: { named: string | null } }).leadAgent;
-  };
+  /** What a person named, read off the store's file: never a write. */
+  const namedBy = (email: string) =>
+    new PersonAgentLinks(s.dataDir, s.handle.identities).sidesOf(emailIdentityId(email)).named;
+  const queued = () => s.handle.tasks.listQueuedComments(s.board).length;
 
   it('names a lead agent on their own board from the share host, then messages it', async () => {
     const named = await profile(RIVERBEND, { leadAgentId: R1 });
@@ -386,19 +385,64 @@ describe('a share member and private messages', () => {
 
   it('refuses, and changes nothing, an agent on another board, a write naming somebody else, or a name change', async () => {
     const before = s.handle.identities.get(emailIdentityId(ALICE))?.displayName;
-    for (const body of [
-      { leadAgentId: ELSEWHERE },
-      { leadAgentId: B1, personId: bobId },
-      { leadAgentId: A1, displayName: 'Bob' },
-      { displayName: 'Bob' },
-    ]) {
+    const refusals: Array<[unknown, number, string]> = [
+      [{ leadAgentId: ELSEWHERE }, 403, 'agent_not_on_your_board'],
+      [{ leadAgentId: B1, personId: bobId }, 403, 'share_member_lead_agent_only'],
+      [{ leadAgentId: B1 }, 409, 'agent_claimed'],
+      [{ leadAgentId: A1, displayName: 'Bob' }, 403, 'share_member_lead_agent_only'],
+      [{ displayName: 'Bob' }, 403, 'share_member_lead_agent_only'],
+    ];
+    for (const [body, status, error] of refusals) {
       const res = await profile(ALICE, body);
-      expect(res.status, JSON.stringify(body)).toBe(403);
+      expect(res.status, JSON.stringify(body)).toBe(status);
+      expect(await res.json()).toMatchObject({ error });
     }
     expect(s.handle.identities.get(emailIdentityId(ALICE))?.displayName).toBe(before);
-    expect((await sidesOf(ALICE)).named).toBe(A1);
-    expect((await sidesOf(BOB)).named).toBe(B1);
+    expect(namedBy(ALICE)).toBe(A1);
+    expect(namedBy(BOB)).toBe(B1);
     const alice = await pageOf(await s.visitor(ALICE, '/api/me/messages'));
     expect(alice.agentId).toBe(A1);
+  });
+
+  it('gives an address that is a member of no board no conversation and no agent', async () => {
+    const read = await s.visitor(OUTSIDER, '/api/me/messages');
+    expect(read.status).toBe(409);
+    for (const agentId of [A1, ELSEWHERE]) {
+      const res = await profile(OUTSIDER, { leadAgentId: agentId });
+      expect(await res.json()).toMatchObject({ error: 'agent_not_on_your_board' });
+    }
+    expect(namedBy(OUTSIDER)).toBeNull();
+  });
+
+  it("ends a member's conversation while their board is locked, and gives it back after", async () => {
+    const sendAsAlice = () => s.visitor(ALICE, '/api/me/messages', post({ text: 'While locked' }));
+    expect(s.handle.sharingGate.setBoardLocked(s.board, true)).toMatchObject({ ok: true });
+    try {
+      const rows = queued();
+      expect((await s.visitor(ALICE, '/api/me/messages')).status).toBe(403);
+      expect((await sendAsAlice()).status).toBe(403);
+      expect(queued()).toBe(rows);
+      const renamed = await profile(RIVERBEND, { leadAgentId: R1 });
+      expect(await renamed.json()).toMatchObject({ error: 'agent_not_on_your_board' });
+    } finally {
+      s.handle.sharingGate.setBoardLocked(s.board, false);
+    }
+    const alice = await pageOf(await s.visitor(ALICE, '/api/me/messages'));
+    expect(alice.messages.some((m) => m.text === 'While locked')).toBe(false);
+  });
+
+  it("ends a removed member's conversation with the agent they had linked", async () => {
+    const saltmarshId = await link(SALTMARSH, S1);
+    expect((await s.visitor(SALTMARSH, '/api/me/messages')).status).toBe(200);
+    expect(s.handle.shareLinks.removeMember(s.board, SALTMARSH)).toBe(true);
+    s.handle.shareLinks.removeFromAudience(s.board, SALTMARSH);
+    const rows = queued();
+    expect((await s.visitor(SALTMARSH, '/api/me/messages')).status).toBe(403);
+    const sent = await s.visitor(SALTMARSH, '/api/me/messages', post({ text: 'After removal' }));
+    expect(sent.status).toBe(403);
+    expect(queued()).toBe(rows);
+    const renamed = await profile(SALTMARSH, { leadAgentId: S1 });
+    expect(await renamed.json()).toMatchObject({ error: 'agent_not_on_your_board' });
+    expect(new PersonAgentLinks(s.dataDir, s.handle.identities).leadAgentOf(saltmarshId)).toBe(S1);
   });
 });

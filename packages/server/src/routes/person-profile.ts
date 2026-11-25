@@ -15,21 +15,19 @@
  * their own lead agent, so their private conversation with it
  * (`routes/private-messages.ts`) has somebody at the other end. Their body
  * may carry `leadAgentId` and nothing else, and the agent must be attached
- * to a board their membership admits. A name change stays this machine's
+ * to an open board their membership still admits. A name change stays this machine's
  * (other people read a display name), and any other field is refused whole,
  * so a refused body changes nothing.
  */
 import { type Identities, type IdentityRecord, userForIdentity } from '../identities.ts';
 import type { PersonAgentLinks } from '../person-agent-link.ts';
-import type { ShareLinks } from '../share/share-links.ts';
-import type { TaskStore } from '../tasks.ts';
 
 export interface PersonProfileContext {
   identities: Identities;
   personAgentLinks: PersonAgentLinks;
   onPersonRenamed: (personId: string, name: string) => void;
-  taskStore: Pick<TaskStore, 'listWorkspaces' | 'listAttachments'>;
-  shareLinks: Pick<ShareLinks, 'isMember'>;
+  /** Is this agent attached to an open board that admits this member? */
+  memberReachesAgent: (email: string | undefined, agentId: string) => boolean;
   j: (status: number, body: unknown) => Response;
   safeJson: (req: Request) => Promise<Record<string, unknown> | null>;
 }
@@ -86,13 +84,7 @@ function shareMemberRefusal(
   if (keys.length !== 1 || keys[0] !== 'leadAgentId') return 'share_member_lead_agent_only';
   const agentId = body?.leadAgentId;
   if (agentId === null) return null;
-  if (typeof agentId !== 'string') return null;
-  const onTheirBoard = ctx.taskStore
-    .listWorkspaces()
-    .some(
-      (w) =>
-        ctx.shareLinks.isMember(w.id, rec.email) &&
-        ctx.taskStore.listAttachments(w.id).some((a) => a.agentId === agentId.trim()),
-    );
+  if (typeof agentId !== 'string' || !agentId.trim()) return 'invalid_lead_agent';
+  const onTheirBoard = ctx.memberReachesAgent(rec.email, agentId.trim());
   return onTheirBoard ? null : 'agent_not_on_your_board';
 }
