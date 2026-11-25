@@ -79,7 +79,7 @@ vitest's `node` project runs their tests.
 | **Adapters** | `transcribe-*.ts`, `recall*.ts`, `summarize.ts`, `deploy*.ts`, `client-release.ts`, `share/cf-api.ts`, `secret-store.ts`, `git-diff.ts`, `sentry.ts`, `outbound-fetch.ts` | One vendor or OS facility each, behind an injected interface, so a swap or a test double touches one file and no state. |
 | *Composition root* | `bin.ts`, `server-config.ts`, `server-deps.ts`, `start-contract.ts` | Reads the environment once, builds adapters, wires services. Beside the stack, not on top of it. |
 
-- **Imports point one way: `server.ts` → `routes/` → everything else.** A module that names a URL path lives under `routes/`. The rule is [.claude/rules/code-health.md](../../.claude/rules/code-health.md), "A route lives in `routes/`", and `bun run check:imports` enforces it.
+- **Imports point one way: `server.ts` → `routes/` → everything else.** A module that names a URL path lives under `routes/`. The rule is [.claude/rules/code-health.md](../../.claude/rules/code-health.md), "A route lives in `routes/`", and `bun run check:imports` enforces it. Another package reads `routes/` only through `routes/contracts.ts`, the typed route contracts as types.
 - Where each module sits, module by module: [server-layers.md](server-layers.md), [meeting-modules.md](meeting-modules.md), [ops.md](ops.md) and [doc-store.md](doc-store.md).
 
 ### `workspaces-app`

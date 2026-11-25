@@ -326,8 +326,9 @@ a family takes the second unless its handler is small.
      parameter it does not seed yet needs a real one there first, and a read
      that only answers with a query needs its `READ_QUERY` entry.
 
-Either way, re-export the type from `server.ts` and `server/src/index.ts`,
-add a client to `mcp/src/server-client.ts` (`import type` only), and switch
+Either way, add one `export type` line for it to `routes/contracts.ts` —
+the only file under `routes/` another package may import, and
+`bun run check:imports` refuses the rest — add a client to `mcp/src/server-client.ts` (`import type` only), and switch
 each tool's call site to `client.workspaces[':ws']….$post({ param, json })`,
 passing each parameter through `encodeURIComponent`, because `hc` does not
 encode them. Name each optional body field rather than spreading

@@ -120,6 +120,34 @@ describe('violationsIn', () => {
       violationsIn('packages/mcp/src/mcp.ts', "import { z } from './routes/docs.ts';"),
     ).toEqual([]);
   });
+
+  it('flags another package reaching into routes/ past the contracts barrel', () => {
+    const found = violationsIn(
+      'packages/mcp/src/server-client.ts',
+      "import type { MountsApi } from '../../server/src/routes/mounts-api.ts';",
+    );
+    expect(found).toHaveLength(1);
+    expect(found[0]?.rule).toBe('package-imports-routes');
+    expect(found[0]?.to).toBe('packages/server/src/routes/mounts-api.ts');
+  });
+
+  it('allows another package to import the contracts barrel', () => {
+    expect(
+      violationsIn(
+        'packages/mcp/src/tools/docs.ts',
+        "import type { ScopedEditFields } from '../../../server/src/routes/contracts.ts';",
+      ),
+    ).toEqual([]);
+  });
+
+  it('flags a server service importing the barrel — it is for other packages', () => {
+    const found = violationsIn(
+      'packages/server/src/index.ts',
+      "export type { MountsApi } from './routes/contracts.ts';",
+    );
+    expect(found).toHaveLength(1);
+    expect(found[0]?.rule).toBe('non-route-imports-routes');
+  });
 });
 
 describe('audit over a tree', () => {
@@ -142,6 +170,22 @@ describe('audit over a tree', () => {
       'routes-imports-server',
     ]);
     expect(found.find((v) => v.rule === 'routes-imports-server')?.specifier).toBe('../server.ts');
+  });
+
+  it('reads every package, not just the server', () => {
+    const root = fixture();
+    mkdirSync(join(root, 'packages', 'mcp', 'src'), { recursive: true });
+    write(
+      root,
+      'packages/mcp/src/client.ts',
+      "import type { A } from '../../server/src/routes/contracts.ts';\nimport type { B } from '../../server/src/routes/docs.ts';",
+    );
+    const found = audit(root);
+    expect(found).toHaveLength(1);
+    expect(found[0]).toMatchObject({
+      from: 'packages/mcp/src/client.ts',
+      rule: 'package-imports-routes',
+    });
   });
 
   it('answers empty for a tree with no server package rather than throwing', () => {

@@ -56,6 +56,9 @@ Two consequences, and they are the ones that were being got wrong:
   it is the router. A shared name that both a route and a service need lives
   with the service, and the route's context module re-exports it:
   `review-gate-types.ts` holds the two gate verdicts for that reason.
+  Another package reads `routes/` through one file, `routes/contracts.ts`,
+  which re-exports the typed route contracts as types; a new contract is a
+  line there, never an export edit to `server.ts`.
 
 Inside `routes/`, one family per file, and the shared vocabulary of a family —
 its context interface, its per-request shape, the parsers more than one of its
