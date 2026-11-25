@@ -13,7 +13,7 @@
         <string>{{BUN_BIN}}</string>
         <string>run</string>
         <string>scripts/serve.ts</string>
-        <!-- PROD: no hot-reload. A `bun --watch` reload once left the server
+        <!-- PROD: no hot-reload. A reload under bun's watch mode once left the server
              alive-but-unbound and took the fleet-shared review server down. -->
         <string>--no-watch</string>
     </array>
@@ -106,6 +106,16 @@
 
     <key>ThrottleInterval</key>
     <integer>10</integer>
+
+    <!-- Interactive: run with the same CPU and I/O limits as an app, which is
+         none. With no ProcessType launchd throttles the job's CPU and I/O.
+         On 25 Nov 2026, with 30+ agent sessions on the Mac, the supervisor
+         and the server sat at priority 20 while the sessions ran at 31, and
+         every request took 1-4s while using almost no CPU. The server is the
+         supervisor's child and ran at the same priority. See
+         docs/architecture/supervisor.md, "launchd runs it as Interactive". -->
+    <key>ProcessType</key>
+    <string>Interactive</string>
 
     <key>StandardOutPath</key>
     <string>{{LOG_DIR}}/com.fryanpan.claude-workspaces.out.log</string>
