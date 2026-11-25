@@ -134,7 +134,9 @@ describe('the files a doc’s StreetMap tags name', () => {
         '<StreetMap src={"computed.json"} />',
         '<Wrap>\n  <StreetMap markers={[{ lat: 1, lng: 2, popup: "a > b" }]} src="later.json" />\n</Wrap>',
       ]),
-    ).toEqual([['data', '311.json'], ['saltmarsh.json'], ['later.json']]);
+    ).toEqual([['data', '311.json'], ['saltmarsh.json'], ['computed.json'], ['later.json']]);
+    // An expression is not read, and an unclosed tag names nothing.
+    expect(mapDataPaths(['<StreetMap src={file} />', '<StreetMap src="open.json"'])).toEqual([]);
   });
 
   it('lists each literal basemap once, so the server knows which keys a doc may have', () => {
@@ -152,7 +154,8 @@ describe('the files a doc’s StreetMap tags name', () => {
     // A tag that names no basemap draws on the default, so it may have its key;
     // one that names it in an expression is not read, and asks for nothing.
     expect(mapBasemapNames(['<StreetMap src="a.json" />'])).toEqual([DEFAULT_BASEMAP]);
-    expect(mapBasemapNames(['<StreetMap basemap={"osm"} />'])).toEqual([]);
+    expect(mapBasemapNames(['<StreetMap basemap={name} />'])).toEqual([]);
+    expect(mapBasemapNames(['<StreetMap basemap={"carto-light"} />'])).toEqual(['carto-light']);
     expect(mapBasemapNames(['<StreetMap basemapStyle="dark" />'])).toEqual([DEFAULT_BASEMAP]);
     expect(mapBasemapNames(['<PlotChart src="a.json" />'])).toEqual([]);
   });

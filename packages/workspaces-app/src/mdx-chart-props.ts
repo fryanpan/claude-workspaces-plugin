@@ -12,14 +12,16 @@
  * site's component accepts but draws nothing for is named in `siteIgnores`, so
  * the preview never drops a prop without saying so.
  *
- * Props arrive already parsed by `mdx-preview.ts`'s literal parser, so nothing
+ * Props arrive already parsed by core `tag-props.ts`'s literal parser, so nothing
  * here runs the source; a prop it could not read arrives as `UNREADABLE`.
  * `mdx-chart.ts` draws what this returns; the two are split so neither file
  * has to be read to change the other.
  */
 
+import { UNREADABLE } from '@claude-workspaces/core/tag-props';
+
 /** A prop whose value is not a literal — a variable, a call, a spread. */
-export const UNREADABLE: unique symbol = Symbol('unreadable');
+export { UNREADABLE };
 
 export interface ChartPoint {
   x: number;
