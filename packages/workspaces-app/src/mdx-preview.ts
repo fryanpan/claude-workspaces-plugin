@@ -7,12 +7,12 @@
  * nothing else to show.
  *
  * The source is somebody's document text, so nothing here runs it. Props are
- * read by a literal parser that knows numbers, strings, booleans, null, arrays
- * and plain objects, and returns undefined for anything else — a variable, a
- * call, a spread. Every string reaches the DOM through `textContent`.
+ * read by `@claude-workspaces/core/tag-props`, the literal parser the server
+ * also reads a `<StreetMap src>` with, so the file the page asks for is the
+ * file the server serves. Every string reaches the DOM through `textContent`.
  */
 
-import { UNREADABLE } from './mdx-chart-props.ts';
+import { readOpenTag } from '@claude-workspaces/core/tag-props';
 import { type MdxChart, chartOf, drawChart } from './mdx-chart.ts';
 import { type PlotChartSummary, plotChartOf, renderPlotChart } from './mdx-plot-chart.ts';
 import { type StreetMapSummary, renderStreetMap, streetMapOf } from './mdx-street-map.ts';
@@ -55,11 +55,11 @@ export function summarizeMdx(source: string): MdxSummary {
     const comment = text.match(/^\{\s*\/\*([\s\S]*?)\*\/\s*\}$/);
     return { kind: 'expr', label: (comment?.[1] ?? text).trim() };
   }
-  const name = text.match(/^<([A-Za-z][\w.:-]*)?/)?.[1] ?? 'Fragment';
+  const tag = readOpenTag(text);
+  const name = tag.name || 'Fragment';
   const summary: MdxSummary = { kind: 'jsx', label: name };
-  const openEnd = openTagEnd(text);
+  const { props, end: openEnd } = tag;
   if (openEnd < 0) summary.error = `<${name}> is not closed: a quote, a brace or the > is missing`;
-  const props = readProps(text);
   const title = props.get('title');
   if (typeof title === 'string') summary.title = title;
   if (name === 'PlotChart') summary.plot = plotChartOf(props);
@@ -83,207 +83,6 @@ export function summarizeMdx(source: string): MdxSummary {
 
 function isImportName(s: string): boolean {
   return /^[A-Za-z_$][\w$]*$/.test(s) && s !== 'as' && s !== 'type';
-}
-
-// ---- the opening tag's props ------------------------------------------------
-
-/** Index just past the opening tag's `>` or `/>`, or -1. */
-function openTagEnd(s: string): number {
-  const r = new Reader(s, 1);
-  while (r.i < s.length) {
-    const ch = s[r.i];
-    if (ch === '"' || ch === "'") {
-      if (r.string() === undefined) return -1;
-    } else if (ch === '{') {
-      if (!r.skipBraces()) return -1;
-    } else if (ch === '>') return r.i + 1;
-    else r.i++;
-  }
-  return -1;
-}
-
-/** `name="x"` and `name={literal}` props; a prop whose value is not a literal is absent. */
-function readProps(s: string): Map<string, unknown> {
-  const props = new Map<string, unknown>();
-  const end = openTagEnd(s);
-  if (end < 0) return props;
-  const r = new Reader(s.slice(0, end), 1);
-  r.ident(); // the tag name
-  for (;;) {
-    r.ws();
-    const key = r.ident();
-    if (!key) break;
-    r.ws();
-    // A bare attribute is JSX's `true`.
-    if (s[r.i] !== '=') {
-      props.set(key, true);
-      continue;
-    }
-    r.i++;
-    r.ws();
-    if (s[r.i] === '"' || s[r.i] === "'") {
-      const v = r.string();
-      if (v === undefined) break;
-      props.set(key, v);
-    } else if (s[r.i] === '{') {
-      const start = r.i;
-      r.i++;
-      const v = r.value();
-      r.ws();
-      if (v !== NOT_LITERAL && s[r.i] === '}') {
-        props.set(key, v);
-        r.i++;
-      } else {
-        // Kept as unreadable, so a chart can say which prop it could not draw.
-        props.set(key, UNREADABLE);
-        r.i = start;
-        if (!r.skipBraces()) break;
-      }
-    } else break;
-  }
-  return props;
-}
-
-const NOT_LITERAL = Symbol('not-literal');
-const MAX_DEPTH = 8;
-const MAX_ITEMS = 5000;
-
-/** A cursor over JS literal syntax. Reads values; never evaluates. */
-class Reader {
-  constructor(
-    readonly s: string,
-    public i = 0,
-  ) {}
-
-  ws(): void {
-    for (;;) {
-      const m = /^(?:\s+|\/\/[^\n]*|\/\*[\s\S]*?\*\/)/.exec(this.s.slice(this.i));
-      if (!m) return;
-      this.i += m[0].length;
-    }
-  }
-
-  ident(): string {
-    const m = /^[A-Za-z_$][\w$.:-]*/.exec(this.s.slice(this.i));
-    if (!m) return '';
-    this.i += m[0].length;
-    return m[0];
-  }
-
-  string(): string | undefined {
-    const q = this.s[this.i];
-    let out = '';
-    let k = this.i + 1;
-    while (k < this.s.length) {
-      const ch = this.s[k];
-      if (ch === '\\') {
-        out += this.s[k + 1] ?? '';
-        k += 2;
-        continue;
-      }
-      if (ch === q) {
-        this.i = k + 1;
-        return out;
-      }
-      out += ch;
-      k++;
-    }
-    return undefined;
-  }
-
-  skipBraces(): boolean {
-    let depth = 0;
-    while (this.i < this.s.length) {
-      const ch = this.s[this.i];
-      if (ch === '"' || ch === "'" || ch === '`') {
-        if (this.string() === undefined) return false;
-        continue;
-      }
-      if (ch === '{') depth++;
-      else if (ch === '}' && --depth === 0) {
-        this.i++;
-        return true;
-      }
-      this.i++;
-    }
-    return false;
-  }
-
-  value(depth = 0): unknown {
-    if (depth > MAX_DEPTH) return NOT_LITERAL;
-    this.ws();
-    const ch = this.s[this.i];
-    if (ch === '"' || ch === "'") return this.string() ?? NOT_LITERAL;
-    if (ch === '[') return this.array(depth);
-    if (ch === '{') return this.object(depth);
-    const num = /^-?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?/.exec(this.s.slice(this.i));
-    if (num) {
-      this.i += num[0].length;
-      return Number(num[0]);
-    }
-    for (const [word, v] of [
-      ['true', true],
-      ['false', false],
-      ['null', null],
-    ] as const) {
-      if (this.s.startsWith(word, this.i) && !/[\w$]/.test(this.s[this.i + word.length] ?? '')) {
-        this.i += word.length;
-        return v;
-      }
-    }
-    return NOT_LITERAL;
-  }
-
-  private array(depth: number): unknown {
-    this.i++;
-    const out: unknown[] = [];
-    for (;;) {
-      this.ws();
-      if (this.s[this.i] === ']') {
-        this.i++;
-        return out;
-      }
-      if (out.length >= MAX_ITEMS) return NOT_LITERAL;
-      const v = this.value(depth + 1);
-      if (v === NOT_LITERAL) return NOT_LITERAL;
-      out.push(v);
-      this.ws();
-      if (this.s[this.i] === ',') this.i++;
-      else if (this.s[this.i] !== ']') return NOT_LITERAL;
-    }
-  }
-
-  private object(depth: number): unknown {
-    this.i++;
-    // A null prototype: a key named `__proto__` is just a key.
-    const out: Record<string, unknown> = Object.create(null);
-    for (;;) {
-      this.ws();
-      if (this.s[this.i] === '}') {
-        this.i++;
-        return out;
-      }
-      const ch = this.s[this.i];
-      // A bare key is a name or a number: `{ 1: "Jan" }` keys on "1".
-      const bare =
-        ch === '"' || ch === "'"
-          ? undefined
-          : /^(?:[A-Za-z_$][\w$]*|\d+(?:\.\d+)?)/.exec(this.s.slice(this.i))?.[0];
-      const key =
-        bare === undefined ? this.string() : /^\d/.test(bare) ? String(Number(bare)) : bare;
-      if (key === undefined) return NOT_LITERAL;
-      if (bare !== undefined) this.i += bare.length;
-      this.ws();
-      if (this.s[this.i] !== ':') return NOT_LITERAL;
-      this.i++;
-      const v = this.value(depth + 1);
-      if (v === NOT_LITERAL) return NOT_LITERAL;
-      out[key] = v;
-      this.ws();
-      if (this.s[this.i] === ',') this.i++;
-      else if (this.s[this.i] !== '}') return NOT_LITERAL;
-    }
-  }
 }
 
 // ---- DOM --------------------------------------------------------------------

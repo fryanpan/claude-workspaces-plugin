@@ -24,6 +24,7 @@
  * string reaches the DOM as text.
  */
 import { BASEMAPS, DEFAULT_BASEMAP, basemapOf } from './map-basemaps.ts';
+import { readOpenTag } from './tag-props.ts';
 
 /** Observable 10, the scheme PlotChart's categories draw in. */
 export const CATEGORY_COLORS: readonly string[] = Object.freeze([
@@ -281,43 +282,20 @@ export function mapDataSegments(src: string): string[] | null {
   return segs;
 }
 
-/** The literal string prop `name` of the tag whose attributes start at
- *  `from`, written as a quoted string (`name="x"`), by a scan that skips
- *  quoted strings and `{…}` values, so a `>` inside a popup does not end the
- *  tag early. `null` when the tag has the prop in another form (`name={"x"}`
- *  is an expression and is not read); `undefined` when it has no such prop. */
-function literalPropOf(s: string, from: number, name: string): string | null | undefined {
-  const prop = new RegExp(`^\\s+${name}\\s*=\\s*(["'])([^"'\\n]*)\\1`);
-  const named = new RegExp(`^\\s+${name}(?![\\w$.-])`);
-  let depth = 0;
-  for (let i = from; i < s.length; i++) {
-    const ch = s[i];
-    if (ch === '"' || ch === "'" || ch === '`') {
-      const end = s.indexOf(ch, i + 1);
-      if (end < 0) return undefined;
-      i = end;
-    } else if (ch === '{') depth++;
-    else if (ch === '}') depth--;
-    else if (depth === 0 && ch === '>') return undefined;
-    else if (depth === 0 && /\s/.test(ch ?? '')) {
-      const m = prop.exec(s.slice(i));
-      if (m) return m[2];
-      if (named.test(s.slice(i))) return null;
-    }
-  }
-  return undefined;
-}
-
-/** The value of literal prop `name` on every `<StreetMap>` tag in `blocks`
+/** The value of string prop `name` on every `<StreetMap>` tag in `blocks`
  *  that has one, in doc order; `absent` for a tag without the prop at all,
- *  when given. */
+ *  when given. Props are read by `tag-props.ts`, the reader the page draws
+ *  the tag with, so a value here is the value the page uses: `name="x"`,
+ *  `name='x'` and `name={"x"}` all read as `x`, and a prop that is not a
+ *  string literal (`name={x}`) reads as nothing. */
 function streetMapProps(blocks: readonly string[], name: string, absent?: string): string[] {
   const out: string[] = [];
   for (const block of blocks) {
-    for (const m of block.matchAll(/<StreetMap(?![\w$.-])/g)) {
-      const v = literalPropOf(block, (m.index ?? 0) + m[0].length, name);
+    for (const m of block.matchAll(/<StreetMap(?![\w$.:-])/g)) {
+      const tag = readOpenTag(block, m.index ?? 0);
+      const v = tag.props.get(name);
       if (typeof v === 'string') out.push(v);
-      else if (v === undefined && absent !== undefined) out.push(absent);
+      else if (tag.end > 0 && !tag.props.has(name) && absent !== undefined) out.push(absent);
     }
   }
   return out;
