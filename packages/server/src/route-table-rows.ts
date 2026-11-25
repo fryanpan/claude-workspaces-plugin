@@ -12,6 +12,10 @@
  * decides which family sees a request, and `route-table.ts` lists the eight
  * adjacencies where that order is behaviour.
  *
+ * SOME ROWS ARE DISPATCH. For the modules `rowPatterns` registers on their
+ * rows (`routes/hono-families.ts`), a row here is the pattern the router
+ * matches: a handler's new path with no row is never reached.
+ *
  * ADDING A ROUTE: add its row to its family below, then `bun run routes:table`,
  * which also regenerates the span-name templates in core's `route-templates.ts`.
  */
