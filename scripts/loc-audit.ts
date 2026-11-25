@@ -17,6 +17,11 @@
  * Rows naming a file that is gone or has since dropped under the limit are
  * printed as stale and do not fail: a PR that splits a file should tidy its
  * row, but a stale row is a doc chore, not a broken build.
+ *
+ * A row is a verdict and a reason, capped at `ROW_WORD_LIMIT` words. The
+ * argument behind a long one goes to `exceptions-history.md`, which the row
+ * links; the table is read to find one file's verdict, and a 240-word cell
+ * buries the next row.
  */
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
@@ -25,6 +30,8 @@ import { fileURLToPath } from 'node:url';
 export const LINE_LIMIT = 500;
 /** How far a file may move from its row's line count before the gate fails. */
 export const DRIFT_LIMIT = 0.2;
+/** Words a row may spend after its Lines cell: the verdict and the reason. */
+export const ROW_WORD_LIMIT = 100;
 
 // `import.meta.url`, not Bun's `import.meta.dir`: the colocated test runs under
 // vitest, where `import.meta.dir` is undefined and module load throws.
@@ -93,6 +100,20 @@ export function rowCounts(markdown: string): Map<string, number> {
   return counts;
 }
 
+/**
+ * The word count of every row after its Lines cell, by path. The path and the
+ * count are not prose, so they are free; a link is one word however long its
+ * target is.
+ */
+export function rowWords(markdown: string): Map<string, number> {
+  const words = new Map<string, number>();
+  for (const m of markdown.matchAll(/^\| `(packages\/[^`]+)` \| \d[\d,]* \|(.*)$/gm)) {
+    const tokens = (m[2] as string).split(/\s+/).filter((t) => t !== '' && t !== '|');
+    words.set(m[1] as string, tokens.length);
+  }
+  return words;
+}
+
 export function walk(dir: string, root: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const abs = join(dir, entry.name);
@@ -123,10 +144,12 @@ export function oversizedFiles(root: string): Offender[] {
 }
 
 export type Drift = Offender & { listed: number };
+export type Wordy = { path: string; words: number };
 export type AuditResult = {
   unlisted: Offender[];
   stale: string[];
   drifted: Drift[];
+  wordy: Wordy[];
   total: number;
 };
 
@@ -149,6 +172,9 @@ export function audit(root: string): AuditResult {
       const c = counts.get(f.path);
       return c && Math.abs(f.lines - c) / c > DRIFT_LIMIT ? [{ ...f, listed: c }] : [];
     }),
+    wordy: [...rowWords(doc)]
+      .filter(([, words]) => words > ROW_WORD_LIMIT)
+      .map(([path, words]) => ({ path, words })),
     total: over.length,
   };
 }
@@ -171,8 +197,14 @@ function main(): number {
     console.error(`❌ ${f.path} is ${f.lines} lines; its row says ${f.listed}. Update the row.`);
   }
 
+  for (const r of result.wordy) {
+    console.error(
+      `❌ ${r.path}'s row is ${r.words} words; the cap is ${ROW_WORD_LIMIT}. Keep the verdict and the reason, and move the rest to exceptions-history.md.`,
+    );
+  }
+
   if (result.unlisted.length === 0) {
-    if (result.drifted.length > 0) return 1;
+    if (result.drifted.length > 0 || result.wordy.length > 0) return 1;
     console.log('\n✅ every file over the limit has a written verdict.');
     return 0;
   }
