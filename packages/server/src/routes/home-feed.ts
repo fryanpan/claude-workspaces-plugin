@@ -6,6 +6,10 @@
  *   GET /workspaces/:ws/home-feed/events:stream  `landing.changed` frames, no
  *                                                content, when any item may
  *                                                have moved
+ *   POST /workspaces/:ws/home-feed/escalation-ack  `{deadSince}`: Team Lead
+ *                                                there holds this board's dead
+ *                                                stretch, so its owner item
+ *                                                is not filed (`stall-escalation.ts`)
  *
  * A project server answers these; the Mac's server is the only intended
  * caller, and it calls OUT (`home-remotes.ts`). Both paths sit under
@@ -45,6 +49,7 @@
  * and the stream frames name no board and no content (`landing-changes.ts`).
  */
 import { type BoardAgentClaims, boardAgentBearerOf } from '../auth/board-agent-token.ts';
+import type { HomeFeedFollowers } from '../home-feed-followers.ts';
 import type { HomeFeed } from '../home-feed.ts';
 import { LANDING_CHANNEL } from '../landing-changes.ts';
 import type { CfAccessVerifier } from '../middleware/cf-access.ts';
@@ -52,7 +57,8 @@ import { isLoopbackAddress } from '../middleware/host-guard.ts';
 import { isBrowserRequest } from '../middleware/write-gate.ts';
 import { type SseBus, openSseStream } from '../sse.ts';
 
-const FEED_PATH = /^\/workspaces\/([A-Za-z0-9_-]{1,128})\/home-feed(\/events:stream)?$/;
+const FEED_PATH =
+  /^\/workspaces\/([A-Za-z0-9_-]{1,128})\/home-feed(\/events:stream|\/escalation-ack)?$/;
 
 export interface HomeFeedRoutesContext {
   sse: SseBus;
@@ -72,6 +78,11 @@ export interface HomeFeedRoutesContext {
   accessInFront?: () => boolean;
   /** The external-access master switch (`SharingGate.isEnabled`). */
   externalAccessOpen: () => boolean;
+  /** Team Lead on the caller's machine holds the stretch that began at
+   *  `deadSince`; true when that is the board's current one. Absent → 404. */
+  ackEscalation?: (workspaceId: string, deadSince: number) => boolean;
+  /** Who follows which board's feed (`home-feed-followers.ts`). */
+  followers?: HomeFeedFollowers;
   j: (status: number, body: unknown) => Response;
 }
 
@@ -134,9 +145,13 @@ export async function handleHomeFeedRoute(
   if (!(await homeFeedCallerAllowed(ctx, req, boardId))) {
     return ctx.j(403, { error: 'forbidden' });
   }
+  if (m[2] === '/escalation-ack') return ackRoute(ctx, req, boardId);
   if (req.method !== 'GET') return ctx.j(405, { error: 'method-not-allowed' });
   if (ctx.boardName(boardId) === undefined) return ctx.j(404, { error: 'not_found' });
   if (m[2]) {
+    // Closed when the caller goes: a follower is one holding the stream.
+    const close = ctx.followers?.opened(boardId);
+    if (close) req.signal.addEventListener('abort', close, { once: true });
     // A tunnel caller's stream is marked so the master switch hangs it up
     // when external access goes off; the check above only stops new ones.
     const external = req.headers.has('cf-ray');
@@ -152,5 +167,28 @@ export async function handleHomeFeedRoute(
       external,
     );
   }
+  ctx.followers?.read(boardId);
   return ctx.j(200, await ctx.feed(boardId));
+}
+
+/** The most bytes an acknowledgement body may be. */
+const MAX_ACK_BYTES = 256;
+
+async function ackRoute(ctx: HomeFeedRoutesContext, req: Request, boardId: string) {
+  if (req.method !== 'POST') return ctx.j(405, { error: 'method-not-allowed' });
+  if (!ctx.ackEscalation || ctx.boardName(boardId) === undefined) {
+    return ctx.j(404, { error: 'not_found' });
+  }
+  const raw = await req.text();
+  if (raw.length > MAX_ACK_BYTES) return ctx.j(413, { error: 'too_large' });
+  let deadSince: unknown;
+  try {
+    deadSince = (JSON.parse(raw) as { deadSince?: unknown })?.deadSince;
+  } catch {
+    return ctx.j(400, { error: 'bad_json' });
+  }
+  if (typeof deadSince !== 'number' || !Number.isSafeInteger(deadSince) || deadSince <= 0) {
+    return ctx.j(400, { error: 'bad_dead_since' });
+  }
+  return ctx.j(200, { held: ctx.ackEscalation(boardId, deadSince) });
 }

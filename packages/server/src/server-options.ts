@@ -586,6 +586,10 @@ export interface ServerOptions {
    * right interval is a thing an owner discovers by living with it.
    */
   stallEscalateMs?: number;
+  /** How long a dead board a Home elsewhere follows waits for that Home's
+   *  Team Lead to say it holds the board, before filing for the owner (ms).
+   *  Default `REMOTE_ACK_GRACE_MS` (`stall-escalation.ts`). A test seam. */
+  stallRemoteAckGraceMs?: number;
   /**
    * How often each board's keep-moving verdict is recorded (default
    * `KEEP_MOVING_CADENCE_DEFAULT_MS`, four hours; `CW_KEEP_MOVING_HOURS`

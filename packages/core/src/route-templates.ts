@@ -280,6 +280,7 @@ const FROM_ROUTE_TABLE: readonly (readonly string[])[] = [
   ['workspaces', ':id', 'goals', 'reorder'],
   ['workspaces', ':id', 'home'],
   ['workspaces', ':id', 'home-feed'],
+  ['workspaces', ':id', 'home-feed', 'escalation-ack'],
   ['workspaces', ':id', 'home-feed', 'events:stream'],
   ['workspaces', ':id', 'home', 'instructions'],
   ['workspaces', ':id', 'home', 'read'],

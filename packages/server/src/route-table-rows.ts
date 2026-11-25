@@ -112,6 +112,7 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
   ...family('routes/home-feed.ts', [
     ['home-feed', '/workspaces/:ws/home-feed', 'GET'],
     ['home-feed', '/workspaces/:ws/home-feed/events:stream', 'GET'],
+    ['home-feed', '/workspaces/:ws/home-feed/escalation-ack', 'POST'],
   ]),
   // A board pushed from the Mac onto a project machine: above the host guard,
   // its own gate, and claimed only where CW_BOARD_IMPORT_DIR is set.

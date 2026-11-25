@@ -229,6 +229,9 @@ export interface HomeRemotes {
   start(): void;
   /** Every remote board, in table order. */
   boards(): RemoteBoardView[];
+  /** Tell a remote board's server that Team Lead here holds the dead
+   *  stretch that began at `deadSince`; true when it took the word. */
+  acknowledge(boardId: string, deadSince: number): Promise<boolean>;
   dispose(): void;
 }
 
@@ -425,11 +428,32 @@ export function createHomeRemotes(opts: {
     }
   };
 
+  const acknowledge = async (boardId: string, deadSince: number): Promise<boolean> => {
+    if (!views.has(boardId) || disposed) return false;
+    try {
+      const res = await fetchFn(feedUrl(boardId, '/escalation-ack'), {
+        method: 'POST',
+        headers: {
+          ...(await headersFor(boardId, 'application/json')),
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ deadSince }),
+        redirect: 'manual',
+        signal: AbortSignal.timeout(FEED_TIMEOUT_MS),
+      });
+      if (res.status !== 200) return false;
+      return ((await res.json()) as { held?: unknown }).held === true;
+    } catch {
+      return false;
+    }
+  };
+
   return {
     start() {
       for (const boardId of views.keys()) void follow(boardId);
     },
     boards: () => [...views.values()],
+    acknowledge,
     dispose() {
       disposed = true;
       for (const c of controllers) c.abort();

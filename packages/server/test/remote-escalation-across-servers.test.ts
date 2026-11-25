@@ -8,10 +8,12 @@
  * rewrites the one address to the project server's loopback port, which is
  * the caller the feed route admits without Access.
  *
- * What this proves: the project server, finding nobody to tell, files its
- * item and its feed carries the escalation; the Mac's own stall pass then
- * sends Team Lead a stall frame about the REMOTE board, naming the seat and
- * the origin; and the feed stops carrying it once the lead is back.
+ * What this proves: the project server's feed carries the escalation; the
+ * Mac's own stall pass sends Team Lead a stall frame about the REMOTE board,
+ * naming the seat and the origin, and tells the project server Team Lead has
+ * it, so the project server files NO item for the owner; a board there that
+ * no Mac follows still files at once; and the feed stops carrying the
+ * escalation once the lead is back.
  *
  * All fixtures are synthetic — invented names. The repo is public.
  */
@@ -29,6 +31,8 @@ const LEAD = { id: 'agent-riverbend-lead', name: 'Riverbend Lead', kind: 'agent'
 const TEAM_LEAD = 'agent-harbour-master';
 const MAC_ORIGIN = 'mac-origin.harborlight.test';
 const CLOUD_ORIGIN = 'riverbend-origin.harborlight.test';
+/** How long the project server waits for Team Lead's word before filing. */
+const GRACE_MS = 1500;
 
 type Frame = { event: string; data?: Record<string, unknown> };
 
@@ -74,6 +78,10 @@ describe('a dead board on another server reaches Team Lead on the Mac', () => {
   let mac: ServerHandle;
   let board: string;
   let taskId: string;
+  /** A task on a second dead board there, which no Mac follows. */
+  let loneTask: string;
+  /** Each answer the project server gave the Mac's acknowledgement. */
+  const acks: unknown[] = [];
 
   const tmp = () => {
     const dir = mkdtempSync(join(tmpdir(), 'remote-escalation-'));
@@ -111,40 +119,47 @@ describe('a dead board on another server reaches Team Lead on the Mac', () => {
       dataDir: tmp(),
       stallNudgeQuietMs: 200,
       stallEscalateMs: 0,
+      stallRemoteAckGraceMs: GRACE_MS,
       observedWorkFreshMs: 0,
       keepMovingCadenceMs: 0,
       // Configured, and never on this server: the production shape.
       spawnerAgentId: TEAM_LEAD,
     });
-    ({
-      workspace: { id: board },
-    } = await call<{ workspace: { id: string } }>(cloud, '/workspaces', {
-      name: 'riverbend',
-      leadAgentId: LEAD.id,
-    }));
-    await call(cloud, `/workspaces/${board}/agents`, {
-      agentId: LEAD.id,
-      runtime: 'claude-code-local',
-    });
-    ({
-      task: { id: taskId },
-    } = await call<{ task: { id: string } }>(cloud, `/workspaces/${board}/tasks`, {
-      title: 'Rank results by recency',
-      body: 'Agent can rank results by recency so that the queue keeps moving.',
-      assignee: LEAD.name,
-      assigneeKind: 'agent',
-      author: LEAD,
-    }));
-    for (const [to, author] of [
-      ['todo', PERSON],
-      ['in-progress', LEAD],
-    ] as const) {
-      await call(cloud, `/workspaces/${board}/tasks/${taskId}/transition`, {
-        to,
-        author,
-        workspaceId: board,
+    /** A board whose lead holds no stream, with one task stuck in progress. */
+    const deadBoard = async (name: string): Promise<[string, string]> => {
+      const {
+        workspace: { id },
+      } = await call<{ workspace: { id: string } }>(cloud, '/workspaces', {
+        name,
+        leadAgentId: LEAD.id,
       });
-    }
+      await call(cloud, `/workspaces/${id}/agents`, {
+        agentId: LEAD.id,
+        runtime: 'claude-code-local',
+      });
+      const {
+        task: { id: task },
+      } = await call<{ task: { id: string } }>(cloud, `/workspaces/${id}/tasks`, {
+        title: 'Rank results by recency',
+        body: 'Agent can rank results by recency so that the queue keeps moving.',
+        assignee: LEAD.name,
+        assigneeKind: 'agent',
+        author: LEAD,
+      });
+      for (const [to, author] of [
+        ['todo', PERSON],
+        ['in-progress', LEAD],
+      ] as const) {
+        await call(cloud, `/workspaces/${id}/tasks/${task}/transition`, {
+          to,
+          author,
+          workspaceId: id,
+        });
+      }
+      return [id, task];
+    };
+    [board, taskId] = await deadBoard('riverbend');
+    [, loneTask] = await deadBoard('saltmarsh');
 
     const config = parseHomeRemotesConfig(
       JSON.stringify({
@@ -159,12 +174,14 @@ describe('a dead board on another server reaches Team Lead on the Mac', () => {
     if ('error' in config) throw new Error(config.error);
     // The edge, reduced to what this test is about: the one address carried
     // to the project server, from a loopback peer with no cf-ray.
-    const edge: FetchLike = (input, init) => {
+    const edge: FetchLike = async (input, init) => {
       const url = new URL(input);
-      return fetch(`http://127.0.0.1:${cloud.port}${url.pathname}${url.search}`, {
+      const res = await fetch(`http://127.0.0.1:${cloud.port}${url.pathname}${url.search}`, {
         ...init,
         headers: { ...((init?.headers as Record<string, string>) ?? {}), host: 'localhost' },
       });
+      if (url.pathname.endsWith('/escalation-ack')) acks.push(await res.clone().json());
+      return res;
     };
     mac = createServer({
       port: 0,
@@ -182,7 +199,7 @@ describe('a dead board on another server reaches Team Lead on the Mac', () => {
     for (const d of dirs) rmSync(d, { recursive: true, force: true });
   });
 
-  it('files on the project server, carries it on the feed, and tells Team Lead on the Mac', async () => {
+  it('tells Team Lead on the Mac, and the project server asks its owner nothing', async () => {
     const { workspace: harbour } = await call<{ workspace: { id: string } }>(mac, '/workspaces', {
       name: 'harbour',
     });
@@ -192,13 +209,17 @@ describe('a dead board on another server reaches Team Lead on the Mac', () => {
     });
     const teamLead = await stream(mac, harbour.id, TEAM_LEAD);
 
-    // The project server finds nobody to tell and files for the reader.
-    await waitFor(() => {
+    // The project server finds nobody to tell here; its feed says so.
+    const feed = await waitFor(async () => {
       cloud.nudgeStalls();
-      return cloud.tasks.listReviewItems(taskId).length > 0;
+      const f = await cloudFeed();
+      return f.escalation ? f : undefined;
     });
-    const feed = await cloudFeed();
     expect(feed.escalation).toMatchObject({ stuck: 1, lead: LEAD.id });
+    // POSITIVE CONTROL for the absence below: on the same server and tick,
+    // the board no Mac follows files for its owner at once.
+    expect(cloud.tasks.listReviewItems(loneTask).length).toBeGreaterThan(0);
+    const deadSince = feed.escalation?.deadSince as number;
 
     // The Mac's own pass tells Team Lead, once the feed has been re-read.
     const told = await waitFor(() => {
@@ -210,6 +231,13 @@ describe('a dead board on another server reaches Team Lead on the Mac', () => {
       escalatedFrom: LEAD.id,
       remote: { origin: CLOUD_ORIGIN, stuck: 1, deadSince: feed.escalation?.deadSince },
     });
+    // …and says so to the project server, which takes the word.
+    await waitFor(() => acks.length > 0);
+    expect(acks[0]).toEqual({ held: true });
+    // timed: past the grace, so only the word keeps the owner's item off.
+    await waitFor(() => Date.now() - deadSince > GRACE_MS, { timeout: GRACE_MS + 5000 });
+    for (let i = 0; i < 3; i++) cloud.nudgeStalls();
+    expect(cloud.tasks.listReviewItems(taskId)).toEqual([]);
     // Once per dead stretch: more passes add nothing.
     mac.nudgeStalls();
     mac.nudgeStalls();
@@ -217,15 +245,10 @@ describe('a dead board on another server reaches Team Lead on the Mac', () => {
   });
 
   it('the feed stops carrying it once the lead is back, with no item left to withdraw', async () => {
-    // The owner takes the item back, so the lead's return withdraws nothing.
-    // That the board then tells Home its feed moved is pinned in
+    // No item was filed, so the lead's return withdraws nothing. That the
+    // board then tells Home its feed moved is pinned in
     // stall-escalation.test.ts: here the lead's own stall wake also lands on
     // Home, so a frame on this stream could not tell the two apart.
-    for (const item of cloud.tasks.listReviewItems(taskId)) {
-      if (item.review.withdrawnAt === undefined) {
-        expect(cloud.tasks.withdrawReviewItem(taskId, item.id, { actor: PERSON }).ok).toBe(true);
-      }
-    }
     expect((await cloudFeed()).escalation).toBeDefined();
     await stream(cloud, board, LEAD.id);
     await waitFor(async () => {

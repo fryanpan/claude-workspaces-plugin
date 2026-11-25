@@ -31,11 +31,23 @@
  * is forgotten. A board the Mac could not reach keeps its record untouched,
  * since its view holds the last rows read. Memory only: a Mac restart tells
  * Team Lead once more about a board still dead, which costs one turn.
+ *
+ * **The board is told Team Lead has it.** Once Team Lead has heard about a
+ * stretch, and every five minutes while Team Lead stays reachable here, the
+ * Mac says so to the board's server (`acknowledge`, `POST
+ * …/home-feed/escalation-ack`), and that server files no owner item while
+ * the word is fresh (`REMOTE_HOLD_MS` in `stall-escalation.ts`). If Team Lead
+ * goes, the word stops and the owner is asked there. This is the only call
+ * the Mac makes for it, and it goes to the server it already pulls.
  */
 import type { HomeFeedEscalation } from './home-feed.ts';
 import type { RemoteBoardView } from './home-remotes.ts';
 import type { TeamLeadReach } from './stall-escalation.ts';
 import { STALL_EVENT } from './stall-nudge.ts';
+
+/** How often the Mac repeats that Team Lead holds a remote board. A third of
+ *  the board's `REMOTE_HOLD_MS`, so one lost call does not lapse the hold. */
+export const REMOTE_ACK_REFRESH_MS = 5 * 60_000;
 
 /** What Team Lead is sent: the board it is about, the seat nobody holds,
  *  and where the board lives. The MCP renders `remote` with its own remedy
@@ -58,12 +70,18 @@ export interface RemoteEscalationsOptions {
   /** The origin hostname the routing table says holds a board, or undefined
    *  for a board it does not list. */
   originOf: (boardId: string) => string | undefined;
+  /** Tell the board's server Team Lead here holds its stretch; true when it
+   *  took the word. Absent → the board files for its owner as before. */
+  acknowledge?: (boardId: string, deadSince: number) => Promise<boolean>;
   report?: (message: string) => void;
 }
 
 export class RemoteEscalations {
   /** Board id → the dead stretch already told, by its `deadSince`. */
   private readonly told = new Map<string, number>();
+  /** Board id → the stretch last acknowledged to its server, and when. */
+  private readonly acked = new Map<string, { deadSince: number; at: number }>();
+  private readonly acking = new Set<string>();
   private readonly report: (message: string) => void;
 
   constructor(private readonly opts: RemoteEscalationsOptions) {
@@ -86,17 +104,41 @@ export class RemoteEscalations {
     const esc = view.escalation;
     if (!esc) {
       this.told.delete(view.boardId);
+      this.acked.delete(view.boardId);
       return;
     }
-    if (this.told.get(view.boardId) === esc.deadSince) return;
-    const origin = this.opts.originOf(view.boardId);
-    if (origin === undefined) return;
-    if (this.send(view.boardId, origin, esc, now)) this.told.set(view.boardId, esc.deadSince);
+    if (this.told.get(view.boardId) !== esc.deadSince) {
+      const origin = this.opts.originOf(view.boardId);
+      if (origin === undefined) return;
+      if (!this.send(view.boardId, origin, esc, now)) return;
+      this.told.set(view.boardId, esc.deadSince);
+    }
+    this.acknowledge(view.boardId, esc.deadSince, now);
+  }
+
+  /** Say Team Lead holds the stretch, while it can still be reached here. */
+  private acknowledge(boardId: string, deadSince: number, now: number): void {
+    const ack = this.opts.acknowledge;
+    if (!ack || this.acking.has(boardId) || this.teamLeadBoard() === undefined) return;
+    const last = this.acked.get(boardId);
+    if (last?.deadSince === deadSince && now - last.at < REMOTE_ACK_REFRESH_MS) return;
+    this.acking.add(boardId);
+    ack(boardId, deadSince)
+      .then((held) => {
+        if (held) this.acked.set(boardId, { deadSince, at: now });
+      })
+      .catch(() => {})
+      .finally(() => this.acking.delete(boardId));
+  }
+
+  private teamLeadBoard(): string | undefined {
+    const reach = this.opts.teamLead;
+    return reach.boards().find((id) => reach.canReach(id, reach.agentId));
   }
 
   private send(boardId: string, origin: string, esc: HomeFeedEscalation, now: number): boolean {
     const reach = this.opts.teamLead;
-    const on = reach.boards().find((id) => reach.canReach(id, reach.agentId));
+    const on = this.teamLeadBoard();
     if (on === undefined) return false;
     const frame: RemoteStallFrame = {
       event: STALL_EVENT,

@@ -240,6 +240,8 @@ export interface StallWiringContext {
   /** How long a board must be without any live session — no stream, no
    *  heartbeat, no agent write — before it files past its lead (ms). */
   stallEscalateMs?: number;
+  /** `StallEscalationOptions.remoteAckGraceMs`. */
+  stallRemoteAckGraceMs?: number;
   /** The fleet's spawner — Team Lead — by agent id: the first addressee when
    *  a board is dead. Absent → the reader is the only one. */
   spawnerAgentId?: string;
@@ -254,7 +256,12 @@ export interface StallWiringContext {
   remoteBoards?: {
     views: () => readonly RemoteBoardView[];
     originOf: (boardId: string) => string | undefined;
+    /** Tell the board's server that Team Lead here holds its dead stretch. */
+    acknowledge?: (boardId: string, deadSince: number) => Promise<boolean>;
   };
+  /** Whether a Home on another machine follows this board's feed
+   *  (`home-feed-followers.ts`). */
+  feedFollowed?: (workspaceId: string) => boolean;
 }
 
 /** What `createServer` keeps a handle on. The two snapshots and
@@ -280,6 +287,8 @@ export interface StallWiring {
   stopListeningAnnouncer: () => void;
   /** A board's escalation while nobody is on it, for its home feed. */
   deadBoard: (workspaceId: string) => HomeFeedEscalation | undefined;
+  /** Team Lead on another server holds this board's dead stretch. */
+  holdByRemoteTeamLead: (workspaceId: string, deadSince: number) => boolean;
 }
 
 export function createStallWiring(ctx: StallWiringContext): StallWiring {
@@ -1302,15 +1311,20 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
               sse.sendToAgent(`ws~${workspaceId}`, agentId, { ...frame }),
           },
           originOf: ctx.remoteBoards.originOf,
+          ...(ctx.remoteBoards.acknowledge ? { acknowledge: ctx.remoteBoards.acknowledge } : {}),
         })
       : undefined;
   const escalations = new StallEscalations({
     store: taskStore,
     dataDir,
     ...(ctx.stallEscalateMs !== undefined ? { escalateMs: ctx.stallEscalateMs } : {}),
+    ...(ctx.stallRemoteAckGraceMs !== undefined
+      ? { remoteAckGraceMs: ctx.stallRemoteAckGraceMs }
+      : {}),
     ...(teamLeadReach !== undefined ? { teamLead: teamLeadReach } : {}),
     // The board's home feed moved: a Home elsewhere re-reads it.
     ...(ctx.notifyLanding ? { onDeadBoardChange: () => ctx.notifyLanding?.() } : {}),
+    ...(ctx.feedFollowed ? { feedFollowed: ctx.feedFollowed } : {}),
   });
   /**
    * The measurement (`keep-moving-verdict.ts`), fed the SAME snapshots the
@@ -1811,5 +1825,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     keepMoving,
     stopListeningAnnouncer: () => listeningAnnouncer.stop(),
     deadBoard: (workspaceId) => escalations.deadBoard(workspaceId),
+    holdByRemoteTeamLead: (workspaceId, deadSince) =>
+      escalations.holdByRemoteTeamLead(workspaceId, deadSince, Date.now()),
   };
 }
