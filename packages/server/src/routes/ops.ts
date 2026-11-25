@@ -108,8 +108,10 @@ export interface OpsRoutesContext {
 /** What only this request knows. */
 export interface OpsRouteRequest {
   req: Request;
-  /** The route-table row the router matched; each handler here answers only
-   *  the rows `hono-families.ts` hands it. */
+  /** The route-table row the router matched. The four single-row handlers
+   *  below test no path: each answers whatever request it is handed, and only
+   *  `OPS_ROWS` in `hono-families.ts` decides which row reaches which. Never
+   *  chain them with `??`. */
   row: RouteRow;
   /** The share target this request resolved to, or null for a member. */
   visitor: ShareTarget | null;
@@ -353,7 +355,6 @@ async function pushSubscriptions(
 // checkout it rebuilds the same bundles, republishes the same client,
 // and prints a successful deploy. See deploy.ts.
 //
-
 // Unlike the refresh above, this one DOES interrupt: it ends this
 // process a moment after answering. That is why the response is sent
 // before the restart fires and why the result is written to disk —

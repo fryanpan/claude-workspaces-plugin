@@ -42,8 +42,9 @@
  * is claimed here with nothing else written, and a path with no row is not
  * claimed at all. The handler is handed the row the request matched and its
  * params, and picks its code for that row from a map keyed by pattern
- * (`row-dispatch.ts`), so it tests no path itself. A family whose handler answers wider than its rows — a 404
- * for any path under its prefix, a visitor refusal on a loose `startsWith` —
+ * (`row-dispatch.ts`), so it tests no path itself. A family whose handler
+ * answers wider than its rows — a 404 for any path under its prefix, a
+ * visitor refusal on a loose `startsWith` —
  * keeps hand-written patterns, because narrowing them to the rows would hand
  * those addresses to whatever is tried next. `test/hono-row-dispatch.test.ts`
  * names both sets.
