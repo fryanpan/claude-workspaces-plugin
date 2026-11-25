@@ -38,9 +38,11 @@
  *
  * WHERE THE PATTERNS COME FROM. A family whose handler answers only the
  * addresses its rows in `route-table-rows.ts` name is registered on those
- * rows (`rowPatterns`), so the table is what dispatches it: a row added there
+ * rows (`claimRows`), so the table is what dispatches it: a row added there
  * is claimed here with nothing else written, and a path with no row is not
- * claimed at all. A family whose handler answers wider than its rows — a 404
+ * claimed at all. The handler is handed the row the request matched and its
+ * params, and picks its code for that row from a map keyed by pattern
+ * (`row-dispatch.ts`), so it tests no path itself. A family whose handler answers wider than its rows — a 404
  * for any path under its prefix, a visitor refusal on a loose `startsWith` —
  * keeps hand-written patterns, because narrowing them to the rows would hand
  * those addresses to whatever is tried next. `test/hono-row-dispatch.test.ts`
@@ -57,7 +59,6 @@ import type { Context, Env, Hono, Next } from 'hono';
 import type { FeatureRoutes } from '../feature-module.ts';
 import type { HonoAppEnv, HonoFamily, HonoGateEnv } from '../hono-env.ts';
 import type { OriginPolicy } from '../middleware/browser-origin.ts';
-import { ROUTE_TABLE } from '../route-table-rows.ts';
 import { SHARING_OFF_PAGE_PATH } from '../sharing-off-door.ts';
 import { type AccessRoutesContext, handleAccessRoutes } from './access.ts';
 import { type AgentIdentityRoutesContext, handleAgentIdentityRoutes } from './agent-identity.ts';
@@ -88,6 +89,7 @@ import { type PromptRoutesContext, handlePromptRoutes } from './prompts.ts';
 import { type RecallWebhookRoutesContext, handleRecallWebhookRoute } from './recall-webhook.ts';
 import { type RepoRoutesContext, handleRepoRoutes } from './repos.ts';
 import { type ReviewQueueRoutesContext, handleReviewQueueRoutes } from './review-queue.ts';
+import { type RouteRow, matchRow, rowHandlers, rowPatterns } from './row-dispatch.ts';
 import { type VoiceAgentLlmRoutesContext, handleVoiceAgentLlmRoute } from './voice-agent-llm.ts';
 import { type VoiceApiRoutesContext, handleVoiceApiRoutes } from './voice-api.ts';
 import { type VoicePageRoutesContext, handleVoicePageRoutes } from './voice-page.ts';
@@ -150,6 +152,24 @@ export function chainValues<A extends { Bindings: HonoGateEnv }>(
 type Answer = Response | null | undefined;
 type ChainValues = ReturnType<typeof chainValues<HonoAppEnv>>;
 
+/** Answer through `run`, or hand the request on; HEAD answers lose their body. */
+async function respond<A extends Env>(
+  c: Context<A>,
+  next: Next,
+  run: () => Answer | Promise<Answer>,
+): Promise<Response | undefined> {
+  const res = await run();
+  if (!res) {
+    await next();
+    return undefined;
+  }
+  if (c.req.raw.method === 'HEAD' && res.body) {
+    await res.body.cancel();
+    return new Response(null, res);
+  }
+  return res;
+}
+
 /**
  * Register one family's handler on every pattern in `patterns`, handing it
  * what `values` reads off the request.
@@ -171,33 +191,39 @@ export function claimWith<A extends Env, V>(
       return undefined;
     }
     tried.add(c.req.raw);
-    const res = await answer(values(c));
-    if (!res) {
-      await next();
-      return undefined;
-    }
-    if (c.req.raw.method === 'HEAD' && res.body) {
-      await res.body.cancel();
-      return new Response(null, res);
-    }
-    return res;
+    return respond(c, next, () => answer(values(c)));
   };
   for (const pattern of patterns) app.all(pattern, middleware);
 }
 
 /**
- * Every distinct pattern the route table holds for one module, in table
- * order — the patterns a row-dispatched family is registered on. `module` is
- * relative to `routes/`, as a row names it without the prefix. A module with
- * no rows throws at boot, so a misspelt name cannot register a family on
- * nothing and silently answer no address.
+ * Register a row-dispatched family on `module`'s rows, and hand its handler
+ * the row the request matched (`row-dispatch.ts`). The row is found again on
+ * the raw path in table order, so the handler gets the same row whichever of
+ * the module's patterns Hono ran first, and a path whose raw spelling matches
+ * no row is handed on as the old handlers' own tests declined it.
  */
-export function rowPatterns(module: string): string[] {
-  const patterns = [
-    ...new Set(ROUTE_TABLE.filter((r) => r.module === `routes/${module}`).map((r) => r.pattern)),
-  ];
-  if (patterns.length === 0) throw new Error(`rowPatterns: no route-table rows for ${module}`);
-  return patterns;
+export function claimRowsWith<A extends Env, V>(
+  app: Hono<A>,
+  values: (c: Context<A>) => V,
+  module: string,
+  answer: (v: V, row: RouteRow) => Answer | Promise<Answer>,
+): void {
+  const tried = new WeakSet<Request>();
+  const middleware = async (c: Context<A>, next: Next): Promise<Response | undefined> => {
+    if (tried.has(c.req.raw)) {
+      await next();
+      return undefined;
+    }
+    tried.add(c.req.raw);
+    const row = matchRow(module, new URL(c.req.raw.url).pathname);
+    if (!row) {
+      await next();
+      return undefined;
+    }
+    return respond(c, next, () => answer(values(c), row));
+  };
+  for (const pattern of rowPatterns(module)) app.all(pattern, middleware);
 }
 
 /** `claimWith` over the front's own values. */
@@ -209,6 +235,39 @@ function claim(
 ): void {
   claimWith(app, (c) => chainValues(c, ctx), patterns, answer);
 }
+
+/** `claimRowsWith` over the front's own values, the row riding along. */
+function claimRows(
+  app: Hono<HonoAppEnv>,
+  ctx: HonoFamiliesContext,
+  module: string,
+  answer: (v: ChainValues & { row: RouteRow }) => Answer | Promise<Answer>,
+): void {
+  claimRowsWith(
+    app,
+    (c) => chainValues(c, ctx),
+    module,
+    (v, row) => answer({ ...v, row }),
+  );
+}
+
+/** The ops rows, each to the one handler that answers it. */
+const OPS_ROWS = rowHandlers<
+  HonoFamiliesContext,
+  ChainValues & { row: RouteRow },
+  Answer | Promise<Answer>
+>('ops.ts', {
+  '/api/metrics': (ctx, v) => handleOpsMetricsRoute(ctx.opsRoutesCtx, v),
+  '/api/home-remotes': (ctx, v) => handleHomeRemotesRoute(ctx.opsRoutesCtx, v),
+  '/api/summaries/backfill': (ctx, v) => handleSummaryBackfillRoute(ctx.opsRoutesCtx, v),
+  '/api/webhooks/log': (ctx, v) => handleWebhookLogRoute(ctx.opsRoutesCtx, v),
+  '/api/plugin/refresh': (ctx, v) => handleOpsRoutes(ctx.opsRoutesCtx, v),
+  '/api/push/key': (ctx, v) => handleOpsRoutes(ctx.opsRoutesCtx, v),
+  '/api/push/subscriptions': (ctx, v) => handleOpsRoutes(ctx.opsRoutesCtx, v),
+  '/api/deploy': (ctx, v) => handleOpsRoutes(ctx.opsRoutesCtx, v),
+  '/api/sentry': (ctx, v) => handleOpsRoutes(ctx.opsRoutesCtx, v),
+  '/api/signin/owner': (ctx, v) => handleOpsRoutes(ctx.opsRoutesCtx, v),
+});
 
 /** The families, in the order the chain used to try them. */
 export function honoFamilies(ctx: HonoFamiliesContext): HonoFamily[] {
@@ -227,10 +286,10 @@ export function honoFamilies(ctx: HonoFamiliesContext): HonoFamily[] {
       ),
     // routes/voice-agent-llm.ts — one exact path, a vendor calling in.
     (app) =>
-      claim(app, ctx, rowPatterns('voice-agent-llm.ts'), (v) =>
+      claimRows(app, ctx, 'voice-agent-llm.ts', (v) =>
         handleVoiceAgentLlmRoute(ctx.voiceAgentLlmRoutesCtx, {
           req: v.req,
-          pathname: v.pathname,
+          row: v.row,
           shareVisitor: v.visitor !== null,
         }),
       ),
@@ -239,12 +298,12 @@ export function honoFamilies(ctx: HonoFamiliesContext): HonoFamily[] {
     // whose own test is `startsWith('/recall/')`. Hono is tried above that
     // block, and nothing between claims `/recall/status`, so it still is.
     (app) =>
-      claim(app, ctx, rowPatterns('recall-webhook.ts'), (v) =>
+      claimRows(app, ctx, 'recall-webhook.ts', (v) =>
         handleRecallWebhookRoute(ctx.recallWebhookRoutesCtx, v),
       ),
     // routes/mcp-connector.ts — `/mcp`, the hosted connector.
     (app) =>
-      claim(app, ctx, rowPatterns('mcp-connector.ts'), (v) =>
+      claimRows(app, ctx, 'mcp-connector.ts', (v) =>
         handleMcpConnectorRoute(ctx.mcpConnectorCtx, v),
       ),
     // routes/agent-identity.ts — `/api/agent-token` and
@@ -252,17 +311,17 @@ export function honoFamilies(ctx: HonoFamiliesContext): HonoFamily[] {
     // private messages, which share the `/api/agents/` prefix, as in the chain;
     // no row of one matches an address of the other.
     (app) =>
-      claim(app, ctx, rowPatterns('agent-identity.ts'), (v) =>
+      claimRows(app, ctx, 'agent-identity.ts', (v) =>
         handleAgentIdentityRoutes(ctx.agentIdentityRoutesCtx, v),
       ),
     // routes/board-tokens.ts — the list and mint, one token's revoke, the refresh.
     (app) =>
-      claim(app, ctx, rowPatterns('board-tokens.ts'), (v) =>
+      claimRows(app, ctx, 'board-tokens.ts', (v) =>
         handleBoardTokenRoutes(ctx.boardTokenRoutesCtx, v),
       ),
     // routes/board-socket-roots.ts — one pattern, a walled lead's folders.
     (app) =>
-      claim(app, ctx, rowPatterns('board-socket-roots.ts'), (v) =>
+      claimRows(app, ctx, 'board-socket-roots.ts', (v) =>
         handleBoardSocketRootsRoutes(ctx.boardSocketRootsRoutesCtx, v),
       ),
     // routes/repos.ts — `/api/repos` and below it.
@@ -272,26 +331,14 @@ export function honoFamilies(ctx: HonoFamiliesContext): HonoFamily[] {
       ),
     // routes/load-reports.ts — two exact paths.
     (app) =>
-      claim(app, ctx, rowPatterns('load-reports.ts'), (v) =>
+      claimRows(app, ctx, 'load-reports.ts', (v) =>
         handleLoadReportRoutes(ctx.loadReportRoutesCtx, v),
       ),
-    // routes/ops.ts — eight exact paths, four handlers that sat at three
-    // positions in the chain. Each handler declines every path but its own,
-    // so trying them in turn on the module's rows answers each path with the
-    // handler that answered it alone. Each keeps its own visitor, loopback
-    // and `cf-ray` refusals in its own order.
-    (app) =>
-      claim(
-        app,
-        ctx,
-        rowPatterns('ops.ts'),
-        async (v) =>
-          (await handleSummaryBackfillRoute(ctx.opsRoutesCtx, v)) ??
-          handleOpsMetricsRoute(ctx.opsRoutesCtx, v) ??
-          handleHomeRemotesRoute(ctx.opsRoutesCtx, v) ??
-          (await handleOpsRoutes(ctx.opsRoutesCtx, v)) ??
-          handleWebhookLogRoute(ctx.opsRoutesCtx, v),
-      ),
+    // routes/ops.ts — ten exact paths, five handlers that sat at three
+    // positions in the chain. Each row goes to the handler that answered its
+    // path alone (`OPS_ROWS`), and each keeps its own visitor, loopback and
+    // `cf-ray` refusals in its own order.
+    (app) => claimRows(app, ctx, 'ops.ts', (v) => OPS_ROWS(ctx, v)),
     // routes/mounts.ts — `/mounts`, `/mounts/<fileId>…` and `/api/mounts…`.
     (app) =>
       claim(app, ctx, ['/mounts', '/mounts/*', '/api/mounts', '/api/mounts/*'], (v) =>
@@ -299,7 +346,7 @@ export function honoFamilies(ctx: HonoFamiliesContext): HonoFamily[] {
       ),
     // routes/landing-stream.ts — the workspaces list's change feed.
     (app) =>
-      claim(app, ctx, rowPatterns('landing-stream.ts'), (v) =>
+      claimRows(app, ctx, 'landing-stream.ts', (v) =>
         handleLandingStreamRoute(ctx.landingStreamCtx, v),
       ),
     // routes/prompts.ts — its own test is `startsWith('/api/prompts')`.
@@ -307,17 +354,15 @@ export function honoFamilies(ctx: HonoFamiliesContext): HonoFamily[] {
       claim(app, ctx, ['/api/:rest{prompts.*}'], (v) => handlePromptRoutes(ctx.promptRoutesCtx, v)),
     // routes/review-queue.ts — five exact paths.
     (app) =>
-      claim(app, ctx, rowPatterns('review-queue.ts'), (v) =>
+      claimRows(app, ctx, 'review-queue.ts', (v) =>
         handleReviewQueueRoutes(ctx.reviewQueueRoutesCtx, v),
       ),
     // routes/voice-page.ts and routes/voice-api.ts — two files, no address
     // in common.
     (app) =>
-      claim(app, ctx, rowPatterns('voice-page.ts'), (v) =>
-        handleVoicePageRoutes(ctx.voicePageRoutesCtx, v),
-      ),
+      claimRows(app, ctx, 'voice-page.ts', (v) => handleVoicePageRoutes(ctx.voicePageRoutesCtx, v)),
     (app) =>
-      claim(app, ctx, rowPatterns('voice-api.ts'), (v) =>
+      claimRows(app, ctx, 'voice-api.ts', (v) =>
         handleVoiceApiRoutes(ctx.voiceApiRoutesCtx, {
           ...v,
           viaTunnel: () => v.req.headers.has('cf-ray'),
@@ -337,7 +382,7 @@ export function honoFamilies(ctx: HonoFamiliesContext): HonoFamily[] {
     // routes/private-messages.ts — `/api/me/messages` and an agent's reply
     // to one person.
     (app) =>
-      claim(app, ctx, rowPatterns('private-messages.ts'), (v) =>
+      claimRows(app, ctx, 'private-messages.ts', (v) =>
         handlePrivateMessageRoutes(ctx.privateMessageRoutesCtx, v),
       ),
     // routes/coach.ts — its own test is `startsWith('/coach/')`.

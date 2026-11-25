@@ -31,6 +31,7 @@ import type { SseBus } from '../sse.ts';
 import type { TaskStore } from '../tasks.ts';
 import type { PrivateReplyAnswer, PrivateReplyBody } from './person-contract.ts';
 import { answerAs, sent } from './route-contract.ts';
+import { type RouteRow, rowHandlers } from './row-dispatch.ts';
 
 /** The longest message accepted, in characters. */
 export const MAX_PRIVATE_MESSAGE = 8000;
@@ -55,30 +56,36 @@ export interface PrivateMessageRoutesContext {
 
 export interface PrivateMessageRouteRequest {
   req: Request;
-  pathname: string;
+  /** The route-table row the router matched. */
+  row: RouteRow;
   visitor: ShareTarget | null;
   boardAgent: BoardAgentClaims | null;
   provenIdentityFor: () => IdentityRecord | null;
 }
 
-const AGENT_REPLY = /^\/api\/agents\/([^/]+)\/messages\/([^/]+)$/;
-
 export async function handlePrivateMessageRoutes(
   ctx: PrivateMessageRoutesContext,
   rq: PrivateMessageRouteRequest,
 ): Promise<Response | undefined> {
-  const { req, pathname } = rq;
-  if (pathname === '/api/me/messages') {
-    if (req.method === 'GET') return personSide(ctx, rq, 'read');
-    if (req.method === 'POST') return personSide(ctx, rq, 'send');
-    return undefined;
-  }
-  const reply = pathname.match(AGENT_REPLY);
-  if (reply && req.method === 'POST') {
-    return agentReply(ctx, rq, decode(reply[1]), decode(reply[2]));
-  }
-  return undefined;
+  return (await ROWS(ctx, rq)) ?? undefined;
 }
+
+const ROWS = rowHandlers<
+  PrivateMessageRoutesContext,
+  PrivateMessageRouteRequest,
+  Promise<Response> | undefined
+>('private-messages.ts', {
+  '/api/me/messages': (ctx, rq) => {
+    if (rq.req.method === 'GET') return personSide(ctx, rq, 'read');
+    if (rq.req.method === 'POST') return personSide(ctx, rq, 'send');
+    return undefined;
+  },
+  '/api/agents/:agentId/messages/:personId': (ctx, rq) => {
+    if (rq.req.method !== 'POST') return undefined;
+    const { agentId, personId } = rq.row.params;
+    return agentReply(ctx, rq, decode(agentId), decode(personId));
+  },
+});
 
 async function personSide(
   ctx: PrivateMessageRoutesContext,

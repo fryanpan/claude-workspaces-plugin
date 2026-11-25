@@ -20,6 +20,7 @@
 import type { VoiceChat } from '../voice-api/chat.ts';
 import { apiError, bearerOf, modelList, parseChatRequest } from '../voice-api/protocol.ts';
 import type { VoiceApiTokens } from '../voice-api/tokens.ts';
+import { rowHandlers } from './row-dispatch.ts';
 import {
   type VoicePageRouteRequest,
   type VoicePageRoutesContext,
@@ -44,7 +45,8 @@ export type VoiceApiRouteRequest = VoicePageRouteRequest & {
 };
 
 const MAX_BODY = 512 * 1024;
-const TOKEN_PATH = /^\/api\/voice\/tokens\/([A-Za-z0-9_-]{16,64})\/revoke$/;
+/** A voice token's id: any other segment in its place is not a revoke. */
+const TOKEN_ID = /^[A-Za-z0-9_-]{16,64}$/;
 
 async function readJson(req: Request): Promise<unknown | 'too-large'> {
   const declared = Number(req.headers.get('content-length') ?? '0');
@@ -58,14 +60,21 @@ async function readJson(req: Request): Promise<unknown | 'too-large'> {
   }
 }
 
-async function handleApi(ctx: VoiceApiRoutesContext, rq: VoiceApiRouteRequest): Promise<Response> {
+async function handleApi(
+  ctx: VoiceApiRoutesContext,
+  rq: VoiceApiRouteRequest,
+  verb: 'models' | 'chat',
+): Promise<Response> {
   const { j } = ctx;
+  // A share or collab visitor holds no voice token, and is refused first
+  // so nothing here reads its bearer.
+  if (rq.visitor) return j(403, { error: 'not available to share visitors' });
   const fail = (e: { status: number; body: unknown }) => j(e.status, e.body);
   const token = ctx.tokens.verify(bearerOf(rq.req.headers));
   if (!token) {
     return fail(apiError(401, 'invalid_api_key', 'Send a voice API token as a Bearer.'));
   }
-  if (rq.pathname === '/v1/models') {
+  if (verb === 'models') {
     if (rq.req.method !== 'GET') return fail(apiError(405, 'method_not_allowed', 'GET only.'));
     return j(200, modelList(ctx.chat.models()));
   }
@@ -81,9 +90,11 @@ async function handleApi(ctx: VoiceApiRoutesContext, rq: VoiceApiRouteRequest): 
   return answered instanceof Response ? answered : fail(answered);
 }
 
+/** The token list and mint, or (with `revokeId`) one token's revoke. */
 async function handleTokens(
   ctx: VoiceApiRoutesContext,
   rq: VoiceApiRouteRequest,
+  revokeId: string | null,
 ): Promise<Response> {
   const { j, tokens } = ctx;
   const denied = refuseNonOwner(ctx, rq);
@@ -101,10 +112,9 @@ async function handleTokens(
       return j(403, { error: 'same-origin-only', message: 'Use this server’s own pages.' });
     }
   }
-  const revoke = rq.pathname.match(TOKEN_PATH);
-  if (revoke) {
+  if (revokeId !== null) {
     if (rq.req.method !== 'POST') return j(405, { error: 'method not allowed' });
-    return tokens.revoke(revoke[1] ?? '') ? j(200, { ok: true }) : j(404, { error: 'not_found' });
+    return tokens.revoke(revokeId) ? j(200, { ok: true }) : j(404, { error: 'not_found' });
   }
   if (rq.req.method === 'GET') return j(200, { tokens: tokens.list() });
   if (rq.req.method !== 'POST') return j(405, { error: 'method not allowed' });
@@ -119,13 +129,18 @@ export async function handleVoiceApiRoutes(
   ctx: VoiceApiRoutesContext,
   rq: VoiceApiRouteRequest,
 ): Promise<Response | null> {
-  const p = rq.pathname;
-  if (p === '/v1/models' || p === '/v1/chat/completions') {
-    // A share or collab visitor holds no voice token, and is refused first
-    // so nothing here reads its bearer.
-    if (rq.visitor) return ctx.j(403, { error: 'not available to share visitors' });
-    return handleApi(ctx, rq);
-  }
-  if (p === '/api/voice/tokens' || TOKEN_PATH.test(p)) return handleTokens(ctx, rq);
-  return null;
+  return ROWS(ctx, rq);
 }
+
+const ROWS = rowHandlers<VoiceApiRoutesContext, VoiceApiRouteRequest, Promise<Response | null>>(
+  'voice-api.ts',
+  {
+    '/v1/models': (ctx, rq) => handleApi(ctx, rq, 'models'),
+    '/v1/chat/completions': (ctx, rq) => handleApi(ctx, rq, 'chat'),
+    '/api/voice/tokens': (ctx, rq) => handleTokens(ctx, rq, null),
+    '/api/voice/tokens/:id/revoke': async (ctx, rq) => {
+      const id = rq.row.params.id ?? '';
+      return TOKEN_ID.test(id) ? handleTokens(ctx, rq, id) : null;
+    },
+  },
+);

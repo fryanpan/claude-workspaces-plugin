@@ -12,6 +12,7 @@
  */
 import { LANDING_CHANNEL } from '../landing-changes.ts';
 import { type SseBus, openSseStream } from '../sse.ts';
+import { type RouteRow, rowHandlers } from './row-dispatch.ts';
 
 export const LANDING_STREAM_PATH = '/landing/events:stream';
 
@@ -20,11 +21,23 @@ export interface LandingStreamRoutesContext {
   j: (status: number, body: unknown) => Response;
 }
 
+/** What only this request knows; `row` is the route-table row the router matched. */
+interface LandingStreamRouteRequest {
+  req: Request;
+  row: RouteRow;
+  visitor: unknown;
+}
+
 export function handleLandingStreamRoute(
   ctx: LandingStreamRoutesContext,
-  r: { req: Request; pathname: string; visitor: unknown },
+  r: LandingStreamRouteRequest,
 ): Response | null {
-  if (r.pathname !== LANDING_STREAM_PATH) return null;
+  return ROWS(ctx, r);
+}
+
+const ROWS = rowHandlers('landing-stream.ts', { [LANDING_STREAM_PATH]: answerStream });
+
+function answerStream(ctx: LandingStreamRoutesContext, r: LandingStreamRouteRequest): Response {
   if (r.req.method !== 'GET') return ctx.j(405, { error: 'method-not-allowed' });
   if (r.visitor) return ctx.j(404, { error: 'not_found' });
   return openSseStream(ctx.sse, LANDING_CHANNEL);

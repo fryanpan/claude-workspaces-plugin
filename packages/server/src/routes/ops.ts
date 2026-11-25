@@ -43,6 +43,7 @@ import type { PushStore } from '../push-store.ts';
 import type { BlockingWait } from '../review-answer-ledger.ts';
 import { selfTestServerSentry, serverSentryTelemetry } from '../sentry.ts';
 import type { WebhookLogEntry } from '../webhooks.ts';
+import { type RouteRow, rowHandlers } from './row-dispatch.ts';
 
 /** The long-lived collaborators these routes need, built once per server. */
 export interface OpsRoutesContext {
@@ -107,7 +108,9 @@ export interface OpsRoutesContext {
 /** What only this request knows. */
 export interface OpsRouteRequest {
   req: Request;
-  pathname: string;
+  /** The route-table row the router matched; each handler here answers only
+   *  the rows `hono-families.ts` hands it. */
+  row: RouteRow;
   /** The share target this request resolved to, or null for a member. */
   visitor: ShareTarget | null;
   /** The author this request is allowed to claim. */
@@ -121,9 +124,9 @@ export function handleOpsMetricsRoute(
   rq: OpsRouteRequest,
 ): Response | undefined {
   const { docStore, j } = ctx;
-  const { pathname, req, visitor } = rq;
+  const { req, visitor } = rq;
 
-  if (pathname === '/api/metrics' && req.method === 'GET') {
+  if (req.method === 'GET') {
     if (visitor) return j(403, { error: 'not available to share visitors' });
     const stats = docStore.stats();
     // The note-taker's own week rides the metrics reply for the reason
@@ -152,7 +155,7 @@ export function handleHomeRemotesRoute(
   ctx: OpsRoutesContext,
   rq: OpsRouteRequest,
 ): Response | undefined {
-  if (rq.pathname !== '/api/home-remotes' || rq.req.method !== 'GET') return undefined;
+  if (rq.req.method !== 'GET') return undefined;
   if (rq.visitor) return ctx.j(403, { error: 'not available to share visitors' });
   const boards = (ctx.remoteBoards() ?? []).map((v) => ({
     boardId: v.boardId,
@@ -181,9 +184,9 @@ export async function handleSummaryBackfillRoute(
   rq: OpsRouteRequest,
 ): Promise<Response | undefined> {
   const { docStore, j, safeJson } = ctx;
-  const { req, pathname, visitor } = rq;
+  const { req, visitor } = rq;
 
-  if (pathname === '/api/summaries/backfill' && req.method === 'POST') {
+  if (req.method === 'POST') {
     if (visitor) return j(403, { error: 'not available to share visitors' });
     const body = await safeJson(req);
     const minutes = Number(body?.windowMinutes ?? 15);
@@ -199,97 +202,114 @@ export async function handleSummaryBackfillRoute(
  *  it always has. */
 export function handleWebhookLogRoute(
   ctx: OpsRoutesContext,
-  rq: OpsRouteRequest,
+  _rq: OpsRouteRequest,
 ): Response | undefined {
   const { webhookLog, j } = ctx;
-  if (rq.pathname === '/api/webhooks/log') {
-    return j(200, { log: webhookLog.slice(-100) });
-  }
-  return undefined;
+  return j(200, { log: webhookLog.slice(-100) });
 }
 
 /**
- * Plugin refresh, push subscriptions and deploy, tried in source order.
- * `undefined` means none of them matched and the caller's chain continues.
+ * Plugin refresh, push subscriptions, deploy, Sentry state and the sign-in
+ * record: six of ops' rows, one function each. The other four rows have
+ * exported handlers of their own above, and `hono-families.ts` hands each
+ * row to the one handler that answers it.
  */
 export async function handleOpsRoutes(
   ctx: OpsRoutesContext,
   rq: OpsRouteRequest,
 ): Promise<Response | undefined> {
-  const { pluginRefresher, deployer, pushStore, pushNotifier, j, safeJson, requestAddress } = ctx;
-  const { liveness } = ctx;
-  const { req, pathname, visitor, authorFor } = rq;
+  return (await OPS_ROWS(ctx, rq)) ?? undefined;
+}
 
-  // --- REST: plugin refresh ---
-  // The other half of the drift signal: any peer that can read who is
-  // behind can also ask the machine to fetch the new bundle. Safe to
-  // expose to everyone in the workspace because it cannot interrupt
-  // anyone — it rewrites a version-keyed cache, and a running session
-  // keeps loading the path it resolved at launch. Peers take the new
-  // version at their own next restart.
-  if (pathname === '/api/plugin/refresh') {
-    // Unreachable today — `shareScopeAllows` is an allowlist and this
-    // path is not on it, so a share host is refused before any route
-    // runs (host-guard.test.ts pins that). Kept, and kept AHEAD of the
-    // capability check, so that allowlisting this path later cannot
-    // silently open a deploy step to external reviewers, and so an
-    // unconfigured deployment never answers a visitor with what it
-    // would have done.
-    if (visitor) return j(403, { error: 'not available to share visitors' });
-    if (!pluginRefresher) {
-      return j(501, {
+const OPS_ROWS = rowHandlers<OpsRoutesContext, OpsRouteRequest, Promise<Response | undefined>>(
+  'ops.ts',
+  {
+    '/api/plugin/refresh': pluginRefresh,
+    '/api/push/key': pushKey,
+    '/api/push/subscriptions': pushSubscriptions,
+    '/api/deploy': deploy,
+    '/api/sentry': sentryState,
+    '/api/signin/owner': ownerSignIn,
+  },
+  'some',
+);
+
+// --- REST: plugin refresh ---
+// The other half of the drift signal: any peer that can read who is
+// behind can also ask the machine to fetch the new bundle. Safe to
+// expose to everyone in the workspace because it cannot interrupt
+// anyone — it rewrites a version-keyed cache, and a running session
+// keeps loading the path it resolved at launch. Peers take the new
+// version at their own next restart.
+async function pluginRefresh(ctx: OpsRoutesContext, rq: OpsRouteRequest): Promise<Response> {
+  const { pluginRefresher, j } = ctx;
+  const { req, visitor } = rq;
+  // Unreachable today — `shareScopeAllows` is an allowlist and this
+  // path is not on it, so a share host is refused before any route
+  // runs (host-guard.test.ts pins that). Kept, and kept AHEAD of the
+  // capability check, so that allowlisting this path later cannot
+  // silently open a deploy step to external reviewers, and so an
+  // unconfigured deployment never answers a visitor with what it
+  // would have done.
+  if (visitor) return j(403, { error: 'not available to share visitors' });
+  if (!pluginRefresher) {
+    return j(501, {
+      error:
+        'plugin refresh not enabled on this server (dev and staging deliberately cannot spawn an update)',
+    });
+  }
+  if (req.method === 'GET') return j(200, { refresh: pluginRefresher.last() });
+  if (req.method === 'POST') {
+    // Never through the edge. The host guard admits the operator's
+    // own proxied hostname with an Access token, and cloudflared
+    // runs on this box, so a tunnelled request has a loopback peer
+    // address — neither the host class nor the address says "not
+    // from here". `cf-ray` does: Cloudflare stamps it on everything
+    // it proxies and strips any the client sent, which is the test
+    // the host guard already trusts. (Urgent-fixes ticket,
+    // 2026-09-02.)
+    if (req.headers.has('cf-ray')) {
+      return j(403, {
         error:
-          'plugin refresh not enabled on this server (dev and staging deliberately cannot spawn an update)',
+          'plugin refresh cannot be triggered through the edge (proxied request) — run it from the box or the tailnet',
       });
     }
-    if (req.method === 'GET') return j(200, { refresh: pluginRefresher.last() });
-    if (req.method === 'POST') {
-      // Never through the edge. The host guard admits the operator's
-      // own proxied hostname with an Access token, and cloudflared
-      // runs on this box, so a tunnelled request has a loopback peer
-      // address — neither the host class nor the address says "not
-      // from here". `cf-ray` does: Cloudflare stamps it on everything
-      // it proxies and strips any the client sent, which is the test
-      // the host guard already trusts. (Urgent-fixes ticket,
-      // 2026-09-02.)
-      if (req.headers.has('cf-ray')) {
-        return j(403, {
-          error:
-            'plugin refresh cannot be triggered through the edge (proxied request) — run it from the box or the tailnet',
-        });
-      }
-      // And not from a PAGE on this machine either — see
-      // browserCannotOperateBody. Nothing above distinguishes a page
-      // from an agent: the origin policy admits any machine-local
-      // hostname on any port, and a local dev origin is same-site with
-      // this server, so a session cookie rides along.
-      if (isBrowserRequest(req.headers)) return j(403, browserCannotOperateBody());
-      return j(200, { refresh: await pluginRefresher.refresh() });
-    }
-    return j(405, { error: 'method not allowed' });
+    // And not from a PAGE on this machine either — see
+    // browserCannotOperateBody. Nothing above distinguishes a page
+    // from an agent: the origin policy admits any machine-local
+    // hostname on any port, and a local dev origin is same-site with
+    // this server, so a session cookie rides along.
+    if (isBrowserRequest(req.headers)) return j(403, browserCannotOperateBody());
+    return j(200, { refresh: await pluginRefresher.refresh() });
   }
-  // --- REST: deploy this server ---
-  // Pull the deploy source and restart, as one operation. There is no
-  // "just restart" verb here or anywhere below it: a restart re-runs
-  // the supervisor out of the deploy source, so over an unpulled
-  // checkout it rebuilds the same bundles, republishes the same client,
-  // and prints a successful deploy. See deploy.ts.
-  //
-  // --- Push notifications ---
-  //
-  // Three verbs: what key to subscribe against, enrol a device, retire
-  // one. Enrolment is per browser-per-device, so the board calls these
-  // from a settings toggle rather than at page load.
-  if (pathname === '/api/push/key' && req.method === 'GET') {
-    const notifier = await pushNotifier();
-    return notifier
-      ? j(200, { available: true, publicKey: notifier.publicKey() })
-      : // Named rather than a bare false, because "why is the toggle
-        // greyed out" has exactly one answer worth giving: this origin
-        // is not one a service worker can register on.
-        j(200, { available: false, reason: 'insecure-origin' });
-  }
-  if (pathname === '/api/push/subscriptions' && req.method === 'POST') {
+  return j(405, { error: 'method not allowed' });
+}
+
+// --- Push notifications ---
+//
+// Three verbs: what key to subscribe against, enrol a device, retire
+// one. Enrolment is per browser-per-device, so the board calls these
+// from a settings toggle rather than at page load.
+async function pushKey(ctx: OpsRoutesContext, rq: OpsRouteRequest): Promise<Response | undefined> {
+  const { pushNotifier, j } = ctx;
+  if (rq.req.method !== 'GET') return undefined;
+  const notifier = await pushNotifier();
+  return notifier
+    ? j(200, { available: true, publicKey: notifier.publicKey() })
+    : // Named rather than a bare false, because "why is the toggle
+      // greyed out" has exactly one answer worth giving: this origin
+      // is not one a service worker can register on.
+      j(200, { available: false, reason: 'insecure-origin' });
+}
+
+/** Enrol a device (POST) or retire one (DELETE); any other verb declines. */
+async function pushSubscriptions(
+  ctx: OpsRoutesContext,
+  rq: OpsRouteRequest,
+): Promise<Response | undefined> {
+  const { pushStore, j, safeJson } = ctx;
+  const { req, authorFor } = rq;
+  if (req.method === 'POST') {
     const body = await safeJson(req);
     const user = authorFor(body?.author);
     if (!user) return j(400, { error: 'author required' });
@@ -314,7 +334,7 @@ export async function handleOpsRoutes(
     }
     return j(200, { ok: true });
   }
-  if (pathname === '/api/push/subscriptions' && req.method === 'DELETE') {
+  if (req.method === 'DELETE') {
     const body = await safeJson(req);
     const endpoint = body?.endpoint as string | undefined;
     if (!endpoint) return j(400, { error: 'endpoint required' });
@@ -323,134 +343,148 @@ export async function handleOpsRoutes(
     pushStore.disable(endpoint, 'unsubscribed');
     return j(200, { ok: true });
   }
-
-  // Unlike the refresh above, this one DOES interrupt: it ends this
-  // process a moment after answering. That is why the response is sent
-  // before the restart fires and why the result is written to disk —
-  // the reporter does not survive to be asked again.
-  if (pathname === '/api/deploy') {
-    // Same shape and same reasoning as the refresh route's check: a
-    // share host never reaches here (`shareScopeAllows` is a
-    // closed-by-default allowlist that runs first, pinned by
-    // host-guard.test.ts), so this is defense in depth against a later
-    // allowlisting rather than the gate that stops a visitor today.
-    if (visitor) return j(403, { error: 'not available to share visitors' });
-    if (!deployer) {
-      // `liveness` rides along on the 501 for the same reason it exists at
-      // all: a server that cannot deploy is still a server that is up or
-      // down, and staging — the main thing this branch answers — is where
-      // "which server am I actually reaching" gets asked. The status code
-      // and the deploy semantics are untouched.
-      return j(501, {
-        error:
-          'deploy not enabled on this server (dev and staging deliberately cannot pull or restart the deploy source)',
-        liveness: liveness(),
-      });
-    }
-    // Reading is not deploying: a board surface that shows deploy state
-    // is served over the tailnet, and reporting what already happened
-    // cannot restart anything. So the read stays at trusted-local, the
-    // same level as every other operator read on this server.
-    //
-    // TWO CLAIMS, never one. `deploy` is the last deploy's verdict and its
-    // `verification` describes THAT boot; `liveness` is this process, now.
-    // The second field exists because the first read `healthy` right
-    // through the seven minutes prod was unreachable on 16 September, and
-    // peers took it for liveness twice. See `liveness.ts`.
-    if (req.method === 'GET') return j(200, { deploy: deployer.last(), liveness: liveness() });
-    if (req.method === 'POST') {
-      // Triggering one is different, and this is the narrow default.
-      //
-      // `local` in the host guard means "the Host header names one of
-      // our own names", which covers every client on the tailnet and
-      // the LAN — measured, not assumed. The refresh route next door is
-      // safe at that width because it cannot interrupt anybody; a
-      // deploy ends this process and drops every live editor socket on
-      // the box, so it does not inherit that argument.
-      //
-      // Checked on the PEER ADDRESS rather than the Host header,
-      // because the Host header is client-controlled: a LAN and a
-      // tailnet client both reached this server sending
-      // `Host: localhost` in the same measurement. See
-      // `isLoopbackAddress`.
-      //
-      // TO LOOSEN (Bryan's call): drop this block and the route is
-      // reachable by any trusted-local caller again. That is one
-      // deletion, which is why the default is the narrow one — the
-      // mistake it can make is refusing a caller who can retry from
-      // the box, not restarting prod for somebody who should not have
-      // been able to.
-      if (!isLoopbackAddress(requestAddress(req))) {
-        return j(403, {
-          error:
-            'deploy must be triggered from this machine (loopback only) — a deploy restarts the server and drops every live editor',
-        });
-      }
-      // Loopback is necessary, not sufficient: cloudflared runs on
-      // this box, so a request through the tunnel — the operator's
-      // proxied hostname, Access token and all — arrives from
-      // 127.0.0.1 and passes the address test. `cf-ray` is the hop's
-      // own signature (see the refresh route above for why it is the
-      // right test). (Urgent-fixes ticket, 2026-09-02.)
-      if (req.headers.has('cf-ray')) {
-        return j(403, {
-          error:
-            'deploy cannot be triggered through the edge (proxied request) — run it from the box',
-        });
-      }
-      // Loopback is the PEER ADDRESS, which a page served from this
-      // machine also has, so it says nothing about whether a page or an
-      // agent asked. This does — see browserCannotOperateBody.
-      if (isBrowserRequest(req.headers)) return j(403, browserCannotOperateBody());
-      const body = (await safeJson(req)) ?? {};
-      const force = body.force === true;
-      const requestedBy = typeof body.requestedBy === 'string' ? body.requestedBy : undefined;
-      return j(200, {
-        deploy: await deployer.deploy({ force, ...(requestedBy ? { requestedBy } : {}) }),
-      });
-    }
-    return j(405, { error: 'method not allowed' });
-  }
-  // --- REST: this process's own Sentry state ---
-  // GET reads what the SDK's hooks have counted (see sentry.ts); POST sends
-  // one harmless event and waits for the transport's answer. Both sit
-  // behind the deploy route's gates, for the deploy route's reasons: the
-  // counts name this machine's outbound telemetry and the POST spends the
-  // project's quota, so the box and only the box may ask — loopback peer,
-  // never through the edge, and never from a page riding the owner's
-  // session. Nothing here names a DSN, a key or a release.
-  if (pathname === '/api/sentry') {
-    if (visitor) return j(403, { error: 'not available to share visitors' });
-    if (!isLoopbackAddress(requestAddress(req))) {
-      return j(403, { error: 'sentry state is read from this machine only (loopback)' });
-    }
-    if (req.headers.has('cf-ray')) {
-      return j(403, { error: 'sentry state cannot be read through the edge (proxied request)' });
-    }
-    if (isBrowserRequest(req.headers)) return j(403, browserCannotOperateBody());
-    if (req.method === 'GET') return j(200, { sentry: serverSentryTelemetry() });
-    if (req.method === 'POST') return j(200, { sentry: await selfTestServerSentry() });
-    return j(405, { error: 'method not allowed' });
-  }
-
-  // --- REST: the lock-out guard's record (plan 3.5) ---
-  // Whether the owner has signed in here through Better Auth, so a script can
-  // refuse to remove Cloudflare Access before that is proved. The deploy
-  // route's gates, for its reason: it is the machine's own fact, for the
-  // machine's own scripts.
-  if (pathname === '/api/signin/owner') {
-    if (visitor) return j(403, { error: 'not available to share visitors' });
-    if (!isLoopbackAddress(requestAddress(req))) {
-      return j(403, { error: 'the sign-in record is read from this machine only (loopback)' });
-    }
-    if (req.headers.has('cf-ray')) {
-      return j(403, { error: 'the sign-in record cannot be read through the edge' });
-    }
-    if (isBrowserRequest(req.headers)) return j(403, browserCannotOperateBody());
-    if (req.method !== 'GET') return j(405, { error: 'method not allowed' });
-    const owner = ctx.ownerSignIn();
-    return j(200, { recorded: owner !== null, ...(owner ? { owner } : {}), ...ctx.signInModes() });
-  }
-
   return undefined;
+}
+
+// --- REST: deploy this server ---
+// Pull the deploy source and restart, as one operation. There is no
+// "just restart" verb here or anywhere below it: a restart re-runs
+// the supervisor out of the deploy source, so over an unpulled
+// checkout it rebuilds the same bundles, republishes the same client,
+// and prints a successful deploy. See deploy.ts.
+//
+
+// Unlike the refresh above, this one DOES interrupt: it ends this
+// process a moment after answering. That is why the response is sent
+// before the restart fires and why the result is written to disk —
+// the reporter does not survive to be asked again.
+async function deploy(ctx: OpsRoutesContext, rq: OpsRouteRequest): Promise<Response> {
+  const { deployer, liveness, j, safeJson, requestAddress } = ctx;
+  const { req, visitor } = rq;
+  // Same shape and same reasoning as the refresh route's check: a
+  // share host never reaches here (`shareScopeAllows` is a
+  // closed-by-default allowlist that runs first, pinned by
+  // host-guard.test.ts), so this is defense in depth against a later
+  // allowlisting rather than the gate that stops a visitor today.
+  if (visitor) return j(403, { error: 'not available to share visitors' });
+  if (!deployer) {
+    // `liveness` rides along on the 501 for the same reason it exists at
+    // all: a server that cannot deploy is still a server that is up or
+    // down, and staging — the main thing this branch answers — is where
+    // "which server am I actually reaching" gets asked. The status code
+    // and the deploy semantics are untouched.
+    return j(501, {
+      error:
+        'deploy not enabled on this server (dev and staging deliberately cannot pull or restart the deploy source)',
+      liveness: liveness(),
+    });
+  }
+  // Reading is not deploying: a board surface that shows deploy state
+  // is served over the tailnet, and reporting what already happened
+  // cannot restart anything. So the read stays at trusted-local, the
+  // same level as every other operator read on this server.
+  //
+  // TWO CLAIMS, never one. `deploy` is the last deploy's verdict and its
+  // `verification` describes THAT boot; `liveness` is this process, now.
+  // The second field exists because the first read `healthy` right
+  // through the seven minutes prod was unreachable on 16 September, and
+  // peers took it for liveness twice. See `liveness.ts`.
+  if (req.method === 'GET') return j(200, { deploy: deployer.last(), liveness: liveness() });
+  if (req.method === 'POST') {
+    // Triggering one is different, and this is the narrow default.
+    //
+    // `local` in the host guard means "the Host header names one of
+    // our own names", which covers every client on the tailnet and
+    // the LAN — measured, not assumed. The refresh route next door is
+    // safe at that width because it cannot interrupt anybody; a
+    // deploy ends this process and drops every live editor socket on
+    // the box, so it does not inherit that argument.
+    //
+    // Checked on the PEER ADDRESS rather than the Host header,
+    // because the Host header is client-controlled: a LAN and a
+    // tailnet client both reached this server sending
+    // `Host: localhost` in the same measurement. See
+    // `isLoopbackAddress`.
+    //
+    // TO LOOSEN (Bryan's call): drop this block and the route is
+    // reachable by any trusted-local caller again. That is one
+    // deletion, which is why the default is the narrow one — the
+    // mistake it can make is refusing a caller who can retry from
+    // the box, not restarting prod for somebody who should not have
+    // been able to.
+    if (!isLoopbackAddress(requestAddress(req))) {
+      return j(403, {
+        error:
+          'deploy must be triggered from this machine (loopback only) — a deploy restarts the server and drops every live editor',
+      });
+    }
+    // Loopback is necessary, not sufficient: cloudflared runs on
+    // this box, so a request through the tunnel — the operator's
+    // proxied hostname, Access token and all — arrives from
+    // 127.0.0.1 and passes the address test. `cf-ray` is the hop's
+    // own signature (see the refresh route above for why it is the
+    // right test). (Urgent-fixes ticket, 2026-09-02.)
+    if (req.headers.has('cf-ray')) {
+      return j(403, {
+        error:
+          'deploy cannot be triggered through the edge (proxied request) — run it from the box',
+      });
+    }
+    // Loopback is the PEER ADDRESS, which a page served from this
+    // machine also has, so it says nothing about whether a page or an
+    // agent asked. This does — see browserCannotOperateBody.
+    if (isBrowserRequest(req.headers)) return j(403, browserCannotOperateBody());
+    const body = (await safeJson(req)) ?? {};
+    const force = body.force === true;
+    const requestedBy = typeof body.requestedBy === 'string' ? body.requestedBy : undefined;
+    return j(200, {
+      deploy: await deployer.deploy({ force, ...(requestedBy ? { requestedBy } : {}) }),
+    });
+  }
+  return j(405, { error: 'method not allowed' });
+}
+
+// --- REST: this process's own Sentry state ---
+// GET reads what the SDK's hooks have counted (see sentry.ts); POST sends
+// one harmless event and waits for the transport's answer. Both sit
+// behind the deploy route's gates, for the deploy route's reasons: the
+// counts name this machine's outbound telemetry and the POST spends the
+// project's quota, so the box and only the box may ask — loopback peer,
+// never through the edge, and never from a page riding the owner's
+// session. Nothing here names a DSN, a key or a release.
+async function sentryState(ctx: OpsRoutesContext, rq: OpsRouteRequest): Promise<Response> {
+  const { j, requestAddress } = ctx;
+  const { req, visitor } = rq;
+  if (visitor) return j(403, { error: 'not available to share visitors' });
+  if (!isLoopbackAddress(requestAddress(req))) {
+    return j(403, { error: 'sentry state is read from this machine only (loopback)' });
+  }
+  if (req.headers.has('cf-ray')) {
+    return j(403, { error: 'sentry state cannot be read through the edge (proxied request)' });
+  }
+  if (isBrowserRequest(req.headers)) return j(403, browserCannotOperateBody());
+  if (req.method === 'GET') return j(200, { sentry: serverSentryTelemetry() });
+  if (req.method === 'POST') return j(200, { sentry: await selfTestServerSentry() });
+  return j(405, { error: 'method not allowed' });
+}
+
+// --- REST: the lock-out guard's record (plan 3.5) ---
+// Whether the owner has signed in here through Better Auth, so a script can
+// refuse to remove Cloudflare Access before that is proved. The deploy
+// route's gates, for its reason: it is the machine's own fact, for the
+// machine's own scripts.
+async function ownerSignIn(ctx: OpsRoutesContext, rq: OpsRouteRequest): Promise<Response> {
+  const { j, requestAddress } = ctx;
+  const { req, visitor } = rq;
+  if (visitor) return j(403, { error: 'not available to share visitors' });
+  if (!isLoopbackAddress(requestAddress(req))) {
+    return j(403, { error: 'the sign-in record is read from this machine only (loopback)' });
+  }
+  if (req.headers.has('cf-ray')) {
+    return j(403, { error: 'the sign-in record cannot be read through the edge' });
+  }
+  if (isBrowserRequest(req.headers)) return j(403, browserCannotOperateBody());
+  if (req.method !== 'GET') return j(405, { error: 'method not allowed' });
+  const owner = ctx.ownerSignIn();
+  return j(200, { recorded: owner !== null, ...(owner ? { owner } : {}), ...ctx.signInModes() });
 }

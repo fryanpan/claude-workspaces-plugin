@@ -15,6 +15,7 @@ import { refuseNonLocalAgentCaller } from '../auth/agent-token.ts';
 import { isValidBoardId } from '../auth/board-agent-token.ts';
 import type { BoardSocketRoots } from '../board-socket-roots.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
+import { type RouteRow, rowHandlers } from './row-dispatch.ts';
 
 export interface BoardSocketRootsRoutesContext {
   roots: BoardSocketRoots;
@@ -26,18 +27,24 @@ export interface BoardSocketRootsRoutesContext {
 
 export interface BoardSocketRootsRouteRequest {
   req: Request;
-  pathname: string;
+  /** The route-table row the router matched. */
+  row: RouteRow;
   visitor: ShareTarget | null;
 }
-
-const ROOTS_PATH = /^\/api\/board-sockets\/([^/]+)\/roots$/;
 
 export async function handleBoardSocketRootsRoutes(
   ctx: BoardSocketRootsRoutesContext,
   rq: BoardSocketRootsRouteRequest,
 ): Promise<Response | null> {
-  const match = rq.pathname.match(ROOTS_PATH);
-  if (!match) return null;
+  return ROWS(ctx, rq);
+}
+
+const ROWS = rowHandlers('board-socket-roots.ts', { '/api/board-sockets/:ws/roots': answerRoots });
+
+async function answerRoots(
+  ctx: BoardSocketRootsRoutesContext,
+  rq: BoardSocketRootsRouteRequest,
+): Promise<Response> {
   const { req } = rq;
   const { j } = ctx;
   if (rq.visitor) return j(403, { error: 'not available to share visitors' });
@@ -50,7 +57,7 @@ export async function handleBoardSocketRootsRoutes(
   }
   let boardId: string;
   try {
-    boardId = decodeURIComponent(match[1] ?? '');
+    boardId = decodeURIComponent(rq.row.params.ws ?? '');
   } catch {
     return j(400, { error: 'bad boardId' });
   }
