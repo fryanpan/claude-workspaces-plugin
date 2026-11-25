@@ -1,5 +1,15 @@
-import { describe, expect, it } from 'vitest';
-import { OVERVIEW_DOC, judge, moduleOf, topLevelModules } from './architecture-freshness';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import {
+  OVERVIEW_DOC,
+  checkRepo,
+  judge,
+  moduleOf,
+  topLevelModules,
+} from './architecture-freshness';
 
 describe('moduleOf', () => {
   it('records a source file sitting directly in a package src', () => {
@@ -126,5 +136,82 @@ describe('judge', () => {
       ['docs/architecture/stall-detection.md'],
     );
     expect(v.ok).toBe(false);
+  });
+});
+
+describe('checkRepo, against a real git history', () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
+  });
+
+  function git(root: string, ...a: string[]): void {
+    execFileSync(
+      'git',
+      [
+        '-C',
+        root,
+        '-c',
+        'core.hooksPath=/dev/null',
+        '-c',
+        'user.name=Alice',
+        '-c',
+        'user.email=alice@example.com',
+        ...a,
+      ],
+      { stdio: 'ignore' },
+    );
+  }
+
+  function write(root: string, rel: string, text: string): void {
+    mkdirSync(dirname(join(root, rel)), { recursive: true });
+    writeFileSync(join(root, rel), text);
+  }
+
+  /** A repo whose `main` has one module and the overview's map table. */
+  function repo(): string {
+    const root = mkdtempSync(join(tmpdir(), 'arch-freshness-'));
+    dirs.push(root);
+    git(root, 'init', '-q', '-b', 'main');
+    write(root, 'packages/server/src/tasks.ts', 'export {};\n');
+    write(
+      root,
+      OVERVIEW_DOC,
+      '| Module | What it is |\n| --- | --- |\n| `tasks.ts` | The task store. |\n',
+    );
+    git(root, 'add', '-A');
+    git(root, 'commit', '-q', '-m', 'base');
+    git(root, 'checkout', '-q', '-b', 'feature');
+    write(root, 'packages/server/src/harborlight.ts', 'export {};\n');
+    return root;
+  }
+
+  it('passes a new top-level module once the overview gains one row for it', () => {
+    const root = repo();
+    const overview = join(root, OVERVIEW_DOC);
+    writeFileSync(
+      overview,
+      `${readFileSync(overview, 'utf8')}| \`harborlight.ts\` | The new module. |\n`,
+    );
+    git(root, 'add', '-A');
+    git(root, 'commit', '-q', '-m', 'add module and its row');
+
+    const v = checkRepo(root, 'main');
+    expect(v).toEqual({
+      ok: true,
+      reason: 'documented',
+      added: ['packages/server/src/harborlight.ts'],
+      removed: [],
+    });
+  });
+
+  it('fails the same module when the overview is left alone', () => {
+    const root = repo();
+    git(root, 'add', '-A');
+    git(root, 'commit', '-q', '-m', 'add module only');
+
+    const v = checkRepo(root, 'main');
+    expect(v.ok).toBe(false);
+    expect(v.added).toEqual(['packages/server/src/harborlight.ts']);
   });
 });

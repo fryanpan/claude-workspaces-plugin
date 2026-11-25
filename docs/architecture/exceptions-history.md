@@ -251,3 +251,21 @@ One dispatch: every board and doc event this session receives, turned into the o
 Verdict: Exception.
 
 One harness, and it is most of the file: a real route table behind a real Cloudflare Access fixture with a signed reader per role, an injected writer that records what it was handed, and a sweep over the data directory that is first shown finding a string that IS written there. The gate under test is wired in the admission layer, so a case that skipped that harness would pass while the gate never ran. Splitting the file means standing that up twice — or lifting it into a module and having two places to look for what a secret ask is driven through, which is the property this file exists to make checkable. It crossed the line by the two filing-refusal cases the security review asked for.
+
+### `packages/workspaces-app/test/comments-in-view-driver.ts`
+
+Verdict: Exception.
+
+Not a suite — ONE browser page, for the same reason as `meeting-live-overdraw-driver.ts` below. Its fourteen arms (the doc opening under a pane nobody has touched, the reader scrolled down to the transcript at the foot, the reader scrolling back, the reader parked mid-doc while notes land, the jump from the "N above" strip, the reader left at the top while the transcript grows past the fold, an open card whose text just left the top of a short scroll, notes landing above the reader's comments, the page holding the reader's line still while a note lands above it, the same with the browser's own scroll anchoring suppressed the way Safari lacks it, a block above the reader growing with no DOM mutation at all, a rewrap inside the block the top of the pane cuts through, a tick that rebuilds the very block the reader is on, and a rewriting tick that must not take the inline cards out of the flow) each mount the real editor, chrome, balloon column, off-screen hints and live zone through one `mount()`, read geometry through one `read()`, and are bundled into the page as one module by `comments-in-view.test.ts`. They share the `WORDS` cursor, the fixture markdown and the `settle()` that waits out the column's debounces. Splitting it would buy a bundle and a `window.*` entry point per arm, paid on every launch, to separate functions that exist only to be driven from the one probe.
+
+### `packages/workspaces-app/test/comments-in-view.test.ts`
+
+Verdict: Exception.
+
+Five describes over ONE harness, and the harness is a browser launch. `probeFor` keeps one promise per width and hands every case in the file the same `Probe`, so the whole suite pays for two Chrome launches rather than two per describe; `buildPage`, `measure`, the `CHROME` guard and the `afterAll` that removes the throwaway profiles are the rest of what they share. Splitting a describe out would move it into a second file with its own `probes` map, which is another launch, another bundle build and another profile to clean up — around ninety seconds of runtime to separate cases that already read one measurement.
+
+### `packages/workspaces-app/test/meeting-live-overdraw-driver.ts`
+
+Verdict: Exception.
+
+Not a suite — ONE browser page, and everything in it shares the page. The meeting driver, the sampler that asks every frame what is painted over what, and the three built controls (the pre-fix hold offsets, `clip` against `hidden` beside the float, the re-wrap that makes the slot's pinned height go stale, and the tap target that clip is scoped to spare) all run against the same mounted zone, the same `WORDS` cursor and the same scaled clock, and are bundled into the page as one module by `meeting-live-overdraw.test.ts`. Splitting it would buy a second bundle and a second `window.*` entry point per control, paid for on every launch, to separate functions that exist only to be driven from the one probe.

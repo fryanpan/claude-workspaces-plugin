@@ -11,7 +11,8 @@ Every `.ts` / `.tsx` / `.mjs` / `.css` file over 500 lines is split, or has a ro
 naming a verdict and a reason. A `Split` row is queued work and still passes —
 the gate exists so a **new** god file cannot appear with nobody having written
 down why. A row whose line count is more than 20% off the file also fails; the
-fix is the number in the row.
+fix is the number in the row. So does a row over 100 words: keep the verdict and
+the reason, and move the rest to `exceptions-history.md`.
 
 *Enforced by:* `bun run loc:audit` (CI).
 
