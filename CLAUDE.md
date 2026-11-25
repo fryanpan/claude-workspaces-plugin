@@ -217,9 +217,9 @@ The full delivery model is [docs/process/delivery.md](docs/process/delivery.md)
 
 - Diff touches `packages/plugin/**` → bump the patch in TWO places, same
   value: `packages/plugin/.claude-plugin/plugin.json` and
-  `.claude-plugin/marketplace.json`, then `bun run build:mcp`. The MCP
-  handshake's `PLUGIN_VERSION` is read from plugin.json and inlined into the
-  bundle by that build; launcher.test.ts asserts it through the bundle.
+  `.claude-plugin/marketplace.json`, then `bun run build:mcp`. The relay's
+  handshake version is read from plugin.json by the launcher at start;
+  launcher.test.ts asserts it through the launcher.
 - **Bump nothing when the diff touches neither `packages/plugin/**` nor
   `packages/mcp/src/**`** — a needless bump manufactures a total merge order
   across unrelated branches.
@@ -227,7 +227,7 @@ The full delivery model is [docs/process/delivery.md](docs/process/delivery.md)
   past origin/main, and checks other open PRs for the same number (lowest PR
   number holds it; a failed lookup SKIPS LOUDLY — read the log). Merge in
   ascending version order. Story: delivery.md "Version numbers collide".
-- CI rebuilds `packages/plugin/mcp/index.js` and fails on drift. **Never
+- CI rebuilds `packages/plugin/mcp/relay.js` and fails on drift. **Never
   hand-resolve its merge conflicts** — take either side, `bun run build:mcp`,
   commit the result.
 - Delivery: prod refreshes the plugin cache itself (≤30 min, or

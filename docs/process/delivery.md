@@ -17,7 +17,8 @@ who has your change and who does not — and who has to do what about it.
 | What | Travels as | Lands when | Who acts |
 |---|---|---|---|
 | Plugin (commands, skills, hooks, MCP bundle) | Version-keyed copy from the GitHub marketplace | Prod refreshes the cache on its own, ≤30 min after the merge | **The peer**, by restarting its own session |
-| MCP server code | `packages/plugin/mcp/index.js`, **tracked in git** | Same as the plugin | Same |
+| MCP relay | `packages/plugin/mcp/relay.js` (the node relay; the compiled relay is built from `relay/relay.swift` on each Mac), **tracked in git** | Same as the plugin | Same |
+| MCP tools | `packages/mcp/src`, hosted by the server at `/mcp` | Prod restart | **You**, as for server code; a relay session picks up the new tool list with no restart |
 | Browser client (markdown app + widget) | `packages/workspaces-app/dist` / `packages/widget/dist`, **untracked**, published at server start | Prod restart | **You** — pull the deploy source, then restart prod (or `POST /api/deploy`, which is those two steps as one); the reader only reloads |
 | Server code | The checkout the service runs from | Prod restart | Same |
 
@@ -134,14 +135,20 @@ job re-runs.
 
 Do not conflate these. They fail differently and are fixed differently.
 
-**`packages/plugin/mcp/index.js` is TRACKED.** Peers load the MCP server from
-this committed artifact (`.mcp.json` → `${CLAUDE_PLUGIN_ROOT}/mcp/index.js`),
-not from the TypeScript source. Editing `packages/mcp/src/**` and merging
-delivers nothing: any such PR must run `bun run build:mcp` and commit the
-regenerated bundle in the same change. CI rebuilds it and fails if the
-committed copy differs from a fresh build, which is also why CI pins its Bun
-version — bundler output moves between releases. (`packages/mcp/dist/` is
-gitignored and ships nothing.)
+**`packages/plugin/mcp/relay.js` is TRACKED.** Sessions load the node relay
+from this committed artifact (`.mcp.json` → `${CLAUDE_PLUGIN_ROOT}/mcp/relay.js`),
+not from the TypeScript under `packages/mcp/src/relay/`. A PR that edits that
+source must run `bun run build:mcp` and commit the regenerated bundle in the
+same change. CI rebuilds it and fails if the committed copy differs from a
+fresh build, which is also why CI pins its Bun version — bundler output moves
+between releases. The tool code itself is not in any plugin bundle: the
+server hosts it at `/mcp`, so a tool change lands with a prod restart.
+(`packages/mcp/dist/` is gitignored and ships nothing.)
+
+The plugin used to ship the full stdio child as `packages/plugin/mcp/index.js`,
+the rollback behind `CW_MCP_RELAY=0`. It is gone; its last release is the git
+tag `mcp-full-child-rollback`, and `CW_MCP_RELAY=0` now fails at launch with
+a line naming that tag.
 
 **`packages/workspaces-app/dist` and `packages/widget/dist` are UNTRACKED.** They
 are built on the machine that serves them, at server start. Nothing about them
@@ -491,14 +498,12 @@ attached to this board is older than X, and that was N sessions" — plus a
 deliberate decision about the peers the board cannot see.
 
 Note what this does *not* argue for. Removing an MCP **tool** needs no
-delivery gate at all: each session launches its own MCP child from its own
-version-keyed cache, both halves of a tool live in that one bundle, and the
-restart that delivers a deletion is the same restart that delivers its
-replacement — so a session that has not restarted never sees the removal.
-That holds only for a session running the full child (`CW_MCP_RELAY=0`). A
-session running a relay gets its tools from the
-server's hosted connector. A deploy changes that session's tool list with no
-restart, and the relay passes on the server's `tools/list_changed`.
+delivery gate of its own: every session runs a relay, which gets its tools
+from the server's hosted connector. A deploy changes that session's tool list
+with no restart, and the relay passes on the server's `tools/list_changed`.
+(When sessions ran the full child, each carried its tools in its own
+version-keyed bundle, so a session that had not restarted never saw a
+removal. That child is no longer shipped.)
 What genuinely bites is **narrowing something old callers still send or still
 read on the shared server**, and that is exactly the case where the strip
 cannot tell you who those callers are, because the ones that never attached
@@ -538,7 +543,8 @@ once, after.
 ## Shipping checklist
 
 - [ ] Touched `packages/mcp/src/**`? → `bun run build:mcp`, commit
-      `packages/plugin/mcp/index.js`.
+      `packages/plugin/mcp/relay.js` if it moved. A tool change reaches
+      sessions with the prod restart, not the plugin.
 - [ ] Touched `packages/plugin/**`? → bump the patch in both manifests, same
       value, then `bun run build:mcp`.
 - [ ] `bun run test` and `bun run lint` green.

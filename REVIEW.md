@@ -52,7 +52,7 @@ what each of these gets:
 
 - Anything `bun run verify` already enforces: lint, formatting, types, file
   length, import direction, import cycles, coverage, bundle size.
-- Generated files: `packages/plugin/mcp/index.js`, lockfiles, `.coverage/`.
+- Generated files: `packages/plugin/mcp/relay.js`, lockfiles, `.coverage/`.
 - Test code that intentionally violates a production rule.
 
 ## Cap the nits
