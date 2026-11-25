@@ -65,12 +65,28 @@ name: CI
 #   3. The duration table is the median of five runs, refreshed for the two
 #      shard kinds.
 #
-# The server suite stays at two shards. Three were tried, and they moved
+# The server suite stayed at two shards then. Three were tried, and they moved
 # server line coverage by 118 lines in page-nudges.ts with the same tests:
 # bun's coverage of a file depends on which test files share its process
 # (page-nudges-live.test.ts alone reports 8 lines, beside board-lock.test.ts
 # 130), and a third shard regroups every chunk. Main flips the same way when
 # an added test file shifts the chunks.
+#
+# THE FOURTH PASS, 2026-11-25. Six green main runs (45550233528-45629922063)
+# put the slowest shard at 110-128s: `client-browser-core (5)` at 7 shards,
+# `client-browser (5)` at ~103s on a duration table from 16 Nov, and `server`
+# at 103-112s. So `client-browser-core` runs 13 shards, `server` and
+# `server-core` 3 each, and both duration tables are refreshed from five of
+# those runs. 118 lines is 0.1% of server coverage, against a 1.1% margin
+# over its floor (84.1% measured, 83 floor).
+#
+# THE JOB BUDGET IS 40. The account runs at most 40 jobs at once: two runs
+# that overlapped on 25 Nov peaked at exactly 40 running, and 24 of the
+# second run's jobs waited about 60s for a runner. The parallel jobs here
+# total 40 (2 gates + 5 + 14 + 3 + 3 + 13), so one run on its own never
+# queues. A 41st job queues behind the first one to finish, roughly a minute
+# on every verdict, so a new shard needs one taken from somewhere else.
+# That is why `client-browser-core` has 13 shards and not 14.
 #
 # WHAT DID NOT CHANGE. Every gate that ran before runs now — `bun run
 # verify:parity` is the enforcement, and it reads EVERY job in this file
@@ -105,7 +121,12 @@ jobs:
           # for byte against the committed artifact, and bundler output moves
           # between Bun releases. Bump this deliberately, alongside a rebuild.
           bun-version: 1.3.10
-      - run: bun install --frozen-lockfile
+      # Normally 3-5s. One run's install hung for 300s with no limit
+      # (25 Nov), so each attempt gets 60s and one retry; the step's own
+      # timeout is the backstop if `timeout` itself cannot end it.
+      - name: Install dependencies
+        timeout-minutes: 3
+        run: timeout 60 bun install --frozen-lockfile || timeout 60 bun install --frozen-lockfile
       # THIS STEP IS WHY THE LISTS BELOW CAN BE TRUSTED. `bun run verify` is the
       # one command CLAUDE.md tells a builder to run before pushing, and its
       # member list lives in scripts/verify.ts. This asserts that every
@@ -202,7 +223,9 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.10
-      - run: bun install --frozen-lockfile
+      - name: Install dependencies
+        timeout-minutes: 3
+        run: timeout 60 bun install --frozen-lockfile || timeout 60 bun install --frozen-lockfile
       - name: Leak gate can still see
         run: bun run check:scrub-gate
       # The Cloudflare Terraform config (infra/cloudflare): fmt, validate
@@ -308,7 +331,9 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.10
-      - run: bun install --frozen-lockfile
+      - name: Install dependencies
+        timeout-minutes: 3
+        run: timeout 60 bun install --frozen-lockfile || timeout 60 bun install --frozen-lockfile
       - name: Test (client + unit)
         # No CW_BROWSER_TESTS here: it is read only by chromeForSuite(), and
         # a file that calls chromeForSuite() is a browser file by definition,
@@ -345,7 +370,9 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.10
-      - run: bun install --frozen-lockfile
+      - name: Install dependencies
+        timeout-minutes: 3
+        run: timeout 60 bun install --frozen-lockfile || timeout 60 bun install --frozen-lockfile
       - name: Test (browser)
         # The same pair the gates job's client-boot step sets, and for the same
         # reason: these files launch the runner's own Chrome, and a container
@@ -385,8 +412,10 @@ jobs:
   # ended ~14s after the light one, and `server` was the run's last job in 21
   # of 50. The table is scripts/server-durations.json; refresh it with
   # `bun run scripts/server-durations.ts <run-id>...`. Three shards were
-  # replayed too: they take the run's mean from 120.3s to 119.6s against two
-  # balanced ones, because the slowest browser shard is the path by then.
+  # replayed then too, and bought under a second, because the slowest browser
+  # shard was the path. Once `client-browser-core` was split further (25 Nov),
+  # `server` at 103-112s was the path, so it is three shards now: 344
+  # weighted seconds each on the refreshed table, against 516 at two.
   server:
     runs-on: ubuntu-latest
     permissions:
@@ -395,13 +424,15 @@ jobs:
       fail-fast: false
       matrix:
         # Add a shard here and the `ci` job's expected lcov count below too.
-        shard: [1, 2]
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.10
-      - run: bun install --frozen-lockfile
+      - name: Install dependencies
+        timeout-minutes: 3
+        run: timeout 60 bun install --frozen-lockfile || timeout 60 bun install --frozen-lockfile
       - name: Test (server)
         run: |
           bun run test:server --shard ${{ matrix.shard }}/${{ strategy.job-total }} --jobs 8 \
@@ -427,20 +458,26 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3]
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.10
-      - run: bun install --frozen-lockfile
+      - name: Install dependencies
+        timeout-minutes: 3
+        run: timeout 60 bun install --frozen-lockfile || timeout 60 bun install --frozen-lockfile
       - name: Test (server, every board on the collab core)
         run: bun run test:server --core --shard ${{ matrix.shard }}/${{ strategy.job-total }} --jobs 8
 
   # CORE MODE for the browser files: the drivers boot real servers and drive
   # the real board and doc pages, so with CW_COLLAB_CORE_DEFAULT=on every page
-  # they open syncs through the collab core. Half the runners of
-  # `client-browser`, no coverage, for the reason `server-core` gives.
+  # they open syncs through the collab core. No coverage, for the reason
+  # `server-core` gives. At 7 shards this was the slowest job of the run
+  # (110-128s). It has 13 shards, one fewer than `client-browser`, so that the
+  # run fits the 40-job budget described at the top of this file. Replayed on
+  # the refreshed table, the slowest shard is 91 case-seconds per worker at 13
+  # against 84 at 14.
   client-browser-core:
     runs-on: ubuntu-latest
     permissions:
@@ -448,13 +485,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.10
-      - run: bun install --frozen-lockfile
+      - name: Install dependencies
+        timeout-minutes: 3
+        run: timeout 60 bun install --frozen-lockfile || timeout 60 bun install --frozen-lockfile
       - name: Test (browser, every board on the collab core)
         env:
           CW_CHROME_ARGS: --no-sandbox --disable-dev-shm-usage
@@ -520,8 +559,8 @@ jobs:
           cat .lcov/lcov-server-*/lcov.info > .coverage/server/lcov.info
           client=$(ls -d .lcov/lcov-client-* | wc -l)
           server=$(ls -d .lcov/lcov-server-* | wc -l)
-          if [ "$client" -ne 19 ] || [ "$server" -ne 2 ]; then
-            echo "::error::merged $client client and $server server lcov file(s), expected 19 (5 unit + 14 browser) and 2 — the coverage number would be measured from part of the suite."
+          if [ "$client" -ne 19 ] || [ "$server" -ne 3 ]; then
+            echo "::error::merged $client client and $server server lcov file(s), expected 19 (5 unit + 14 browser) and 3 — the coverage number would be measured from part of the suite."
             exit 1
           fi
           wc -c .coverage/vitest/lcov.info .coverage/server/lcov.info
