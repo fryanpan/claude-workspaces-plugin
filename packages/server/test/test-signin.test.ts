@@ -267,4 +267,37 @@ describe('a server running the test sign-in', () => {
     expect(res.status, await res.clone().text()).toBe(200);
     expect(((await res.json()) as { added: string[] }).added).toEqual([BOB]);
   });
+
+  // "Sign in again" (fresh-signin.ts) has to RUN a sign-in. Sending a Google
+  // person straight back to the page left their sign-in as old as before, so
+  // the page said "You signed in again" and asked again, forever.
+  it('"Sign in again" sends a Google person through the sign-in, and the new one is theirs', async () => {
+    const { jar } = await signInAs('alice');
+    const before = jar.cookies.get('__Host-cw-ba.session_token');
+    const next = `/workspaces/${board}`;
+    const res = await browser(`/api/auth/reauth?next=${encodeURIComponent(next)}`, {
+      headers: { cookie: jar.header() },
+    });
+    expect(res.status).toBe(302);
+    const to = new URL(res.headers.get('location') ?? '', origin);
+    expect(to.pathname).toBe('/auth/sign-in');
+    expect(to.searchParams.get('next')).toBe(next);
+    expect(to.searchParams.get('again')).toBe('1');
+    const page = await browser(`${to.pathname}${to.search}`, { headers: { cookie: jar.header() } });
+    expect(page.status).toBe(200);
+    const html = await page.text();
+    expect(html).toContain('Sign in again');
+    expect(html).toContain(`value="${next}"`);
+    // Google is asked to show the account picker, and coming back mints a
+    // new session rather than keeping the old one.
+    const again = await signInAs('alice', jar);
+    expect(again.callback.status).toBe(302);
+    expect(jar.cookies.get('__Host-cw-ba.session_token')).not.toBe(before);
+  });
+
+  it('"Sign in again" with no sign-in to repeat never claims one happened', async () => {
+    const res = await browser('/api/auth/reauth?next=%2Fworkspaces');
+    expect(res.status).toBe(401);
+    expect(res.headers.get('location')).toBeNull();
+  });
 });

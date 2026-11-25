@@ -642,6 +642,10 @@ body.board-body {
 }
 .board-member-level-text {
   display: inline-block;
+  /* The select's own text inset, so a level as text starts where a select's
+     word does (measured 7px at 1180x820). */
+  box-sizing: border-box;
+  padding-inline-start: 7px;
   color: var(--fg-muted);
 }
 .board-member-remove-gap {

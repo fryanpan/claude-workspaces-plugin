@@ -119,9 +119,40 @@ describe('countedActionOf', () => {
     expect(await action('POST', ACCESS_CARD)).toBe('approve-access');
   });
 
+  /** A board where `a` is at Can edit, and every change above that raises. */
+  const atEdit: CountedActionContext = {
+    shares: null,
+    now: NOW,
+    raisesAccess: (_ws, _match, role) => role === 'owner',
+  };
+
+  it('counts a level change only when it raises the person or entry it names', async () => {
+    const seen: unknown[] = [];
+    const lookup: CountedActionContext = {
+      shares: null,
+      now: NOW,
+      raisesAccess: (ws, match, role) => {
+        seen.push([ws, match, role]);
+        return role === 'edit';
+      },
+    };
+    const path = '/workspaces/w-1/members/a%40b.test/role';
+    expect(await action('POST', path, { role: 'view' }, lookup)).toBeNull();
+    expect(await action('POST', path, { role: 'comment' }, lookup)).toBeNull();
+    expect(await action('POST', path, { role: 'edit' }, lookup)).toBe('raise-role');
+    // `member` is the old spelling of edit.
+    expect(await action('POST', path, { role: 'member' }, lookup)).toBe('raise-role');
+    expect(seen[0]).toEqual(['w-1', 'a@b.test', 'view']);
+    // A role the route refuses, or no lookup at all, is counted.
+    expect(await action('POST', path, { role: 'boss' }, lookup)).toBe('raise-role');
+    expect(await action('POST', path, { role: 'view' })).toBe('raise-role');
+  });
+
   it('leaves every narrowing and every task, goal and unarchive verb instant', async () => {
     expect(await action('PUT', '/workspaces/w-1/retired', { retired: false })).toBeNull();
-    expect(await action('POST', '/workspaces/w-1/members/a/role', { role: 'member' })).toBeNull();
+    expect(
+      await action('POST', '/workspaces/w-1/members/a/role', { role: 'view' }, atEdit),
+    ).toBeNull();
     expect(await action('DELETE', '/workspaces/w-1/members/a')).toBeNull();
     expect(await action('POST', '/api/share/enabled', { enabled: false })).toBeNull();
     expect(await action('POST', '/api/share/lock', { locked: true })).toBeNull();

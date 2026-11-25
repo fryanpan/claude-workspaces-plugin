@@ -134,6 +134,8 @@ export interface BoardSignIn {
   handle(req: Request, pathname: string): Promise<Response | null>;
   /** Who this request's cookie signs in, or null. */
   personOf(req: Request): Promise<SignedInPerson | null>;
+  /** "Sign in again"'s destination for a session here, or null (below). */
+  signInAgainPath?(req: Request, next: string): Promise<string | null>;
   /**
    * Close the user list once the tables are made. The migration starts at
    * construction and nothing awaits it until the first request, so closing
@@ -345,6 +347,18 @@ export function createBoardSignIn(opts: BoardSignInOptions): BoardSignIn {
     };
   };
 
+  /**
+   * Where "Sign in again" (`fresh-signin.ts`) sends a person whose proof is a
+   * session here: the sign-in page, which runs Google again with its account
+   * picker and mints a new session, so its time is the one the check reads.
+   * Null when the request carries no such session. The caller checks the
+   * Host is this sign-in's, as the sign-in door does.
+   */
+  const signInAgainPath = async (req: Request, next: string): Promise<string | null> => {
+    if (!(await personOf(req))) return null;
+    return `${SIGNIN_PAGE_PATH}?next=${encodeURIComponent(safeNext(next))}&again=1`;
+  };
+
   const close = async (): Promise<void> => {
     // A failed migration is not the closer's to report: `ready` still
     // rejects for every request that waits on it.
@@ -355,7 +369,7 @@ export function createBoardSignIn(opts: BoardSignInOptions): BoardSignIn {
     db.close();
   };
 
-  return { origin, host, localOnly, handle, personOf, close };
+  return { origin, host, localOnly, handle, personOf, signInAgainPath, close };
 }
 
 function withJson(headers: Headers): Headers {
@@ -398,13 +412,14 @@ const escapeAttr = (s: string): string =>
 function signInPage(query: URLSearchParams, siteKey: string | null): Response {
   const rawNext = safeNext(query.get('next'));
   const next = escapeAttr(rawNext);
+  const again = query.get('again') === '1';
   const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sign in</title></head>
 <body style="font-family: system-ui, sans-serif; display: grid; place-items: center; min-height: 90vh;">
 <main style="text-align: center;">
-<h1 style="font-size: 1.4rem;">Sign in to Claude Workspaces</h1>
+<h1 style="font-size: 1.4rem;">${again ? 'Sign in again to continue' : 'Sign in to Claude Workspaces'}</h1>
 <form method="post" action="${SIGNIN_GOOGLE_PATH}">
 <input type="hidden" name="next" value="${next}">
 <button type="submit" style="font-size: 1rem; padding: 0.6rem 1.2rem;">Continue with Google</button>

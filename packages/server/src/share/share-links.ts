@@ -537,6 +537,29 @@ export class ShareLinks {
     return moved;
   }
 
+  /**
+   * Whether setting `match` to `role` would let anyone do more than they can
+   * now: a person going above their own level, or an audience entry whose own
+   * level goes up or that would lift any member it moves. Both the fresh
+   * sign-in check (`fresh-signin.ts`) and the role route's owner proof ask
+   * this one question, so they cannot disagree about what is a raise. True
+   * for anything the board does not hold, which the route answers itself.
+   */
+  raisesAccess(workspaceId: string, match: string, role: AccessRole): boolean {
+    const person = match.startsWith('@') ? null : this.accessRoleOf(workspaceId, match);
+    if (person !== null) return widensAccess(person, role);
+    const entryLevel = this.audienceAccessOf(workspaceId, match);
+    if (entryLevel === null || role === 'owner') return true;
+    if (widensAccess(entryLevel, role)) return true;
+    const audience = this.audienceOf(workspaceId);
+    return this.membersOf(workspaceId).some(
+      (m) =>
+        m.role !== 'owner' &&
+        admittingEntry(audience, m.email) === match &&
+        widensAccess(accessRoleOf('member', m.access), role),
+    );
+  }
+
   private putAudience(next: BoardAudience): void {
     this.audiences = [...this.audiences.filter((a) => a.workspaceId !== next.workspaceId), next];
     this.save();

@@ -126,12 +126,25 @@ describe('a level per person and per domain', () => {
     await tick();
     const asking = rowOf(m.list, BOB);
     expect(asking.textContent).toContain(`Make ${BOB} an Owner?`);
+    // In the legend's words.
+    expect(asking.textContent).toContain('except who has access');
     // Cancel holds focus, so a stray Enter hands nobody the board.
     expect(document.activeElement).toBe(buttonSaying(asking, 'Cancel'));
     buttonSaying(asking, 'Cancel')?.click();
     await tick();
     expect(m.setRole).not.toHaveBeenCalled();
     expect(selectOf(m.list, BOB).value).toBe('view');
+
+    // Escape is Cancel too, and focus goes back to the select it came from.
+    pick(selectOf(m.list, BOB), 'owner');
+    await tick();
+    document.activeElement?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
+    );
+    await tick();
+    expect(rowOf(m.list, BOB).textContent).not.toContain('Make Owner');
+    expect(document.activeElement).toBe(selectOf(m.list, BOB));
+    expect(m.setRole).not.toHaveBeenCalled();
 
     pick(selectOf(m.list, BOB), 'owner');
     await tick();

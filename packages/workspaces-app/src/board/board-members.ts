@@ -9,15 +9,11 @@
  * person and each domain shows what it may do: Owner, edit, comment or view
  * (`board-member-level.ts`).
  *
- * Two readers, one list. The owner gets a level select and Remove on every
- * row, and the Add form; a member gets the same names and levels as text,
- * with no controls at all. **The missing controls
+ * Two readers, one list. The owner gets a level select, Remove and the Add
+ * form; a member gets the names and levels as text. **The missing controls
  * are not the enforcement**: every write goes to a route that asks the server
- * who you are (`routes/workspace-members.ts`), and an add from anything but
- * the owner's own signed-in browser becomes a proposal rather than a change.
- *
- * The access page (`settings/access-page.ts`) draws each board with this same
- * module, so the two cannot drift into two designs of one list.
+ * who you are (`routes/workspace-members.ts`). The access page
+ * (`settings/access-page.ts`) draws each board with this same module.
  */
 
 import { accessMatchProblem, readAccessMatch } from './access-match.ts';
@@ -248,11 +244,19 @@ export function mountBoardMembers(deps: BoardMembersDeps): BoardMembersHandle {
     const go = button('Make Owner', 'board-member-promote');
     go.addEventListener('click', () => setLevel(row, match, 'owner'));
     const cancel = button('Cancel', 'board-member-cancel');
-    cancel.addEventListener('click', () => {
+    const back = (): void => {
       promoting = null;
       focusAfter = row.key;
       focusLevel = true;
       repaintSoon();
+    };
+    cancel.addEventListener('click', back);
+    // Escape is Cancel, so it never leaves focus on whatever came next.
+    out.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      back();
     });
     out.appendChild(go);
     out.appendChild(cancel);

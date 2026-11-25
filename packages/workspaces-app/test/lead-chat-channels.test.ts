@@ -234,10 +234,16 @@ describe('the chat’s channels', () => {
     // It opens on a conversation they can use, not on the one they cannot.
     await vi.waitFor(() => expect(visitor.view.picker.name.textContent).toBe('Bob'));
     visitor.view.picker.button.click();
+    // The list says it is the owner's, not that it is empty.
+    expect(visitor.rows().find((r) => r.includes('#general'))).toContain(
+      'Only the owner can read this',
+    );
     visitor.pick('#general');
     await vi.waitFor(() => expect(visitor.view.picker.name.textContent).toBe('#general'));
     expect(heading(visitor)).toBe('Only the owner and the lead see this');
     expect(visitor.view.list.textContent).toContain('Only the board’s owner can read this chat');
+    // And names who they can write to instead.
+    expect(visitor.view.list.textContent).toContain('Write to Bob instead');
   });
 
   it('marks a channel unread when a message lands while the chat is closed', async () => {

@@ -321,7 +321,9 @@ export class ThreadPanel {
     // the thread list stays `[]` either side of the transition, so leaving it
     // out means the memo short-circuits and the drawer keeps the pre-sync
     // wording forever.
-    return `${this.tab}|${this.synced ? 's' : 'u'}|${this.activeId ?? ''}|${parts.join('|')}`;
+    // So does a Can view reader's (`doc-gates.ts`), whose empty state offers no comment.
+    const view = document.body.classList.contains('role-view') ? 'v' : '';
+    return `${this.tab}|${this.synced ? 's' : 'u'}${view}|${this.activeId ?? ''}|${parts.join('|')}`;
   }
 
   private filtered(): Thread[] {
@@ -366,7 +368,9 @@ export class ThreadPanel {
       empty.textContent = !this.synced
         ? 'Loading comments…'
         : this.tab === 'open'
-          ? 'No open comments. Select text in the doc to leave one.'
+          ? document.body.classList.contains('role-view')
+            ? 'No open comments.'
+            : 'No open comments. Select text in the doc to leave one.'
           : this.tab === 'resolved'
             ? 'Nothing resolved yet.'
             : 'No comments on this doc yet.';

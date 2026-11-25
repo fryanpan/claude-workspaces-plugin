@@ -71,9 +71,20 @@ export function generalSub(leadName: string, ownersOnly: boolean): string {
     : `Only you and ${leadName} see this`;
 }
 
-/** What `#general` shows a reader the server refused. */
-export const GENERAL_REFUSED =
-  'Only the board’s owner can read this chat. Write to them in their own channel instead.';
+/**
+ * What `#general` shows a reader the server refused, naming the people they
+ * can write to instead: the channel list is where those are.
+ */
+export function generalRefused(people: readonly string[]): string {
+  const head = 'Only the board’s owner can read this chat.';
+  return people.length === 0 ? head : `${head} Write to ${people.join(' or ')} instead.`;
+}
+
+/** The refused `#general`'s line in the channel list, in place of its last message. */
+const GENERAL_REFUSED_LINE = 'Only the owner can read this';
+
+const people = (list: readonly ChannelEntry[]): string[] =>
+  list.filter((c) => c.kind === 'person').map((c) => c.name);
 
 export function wireChannels(opts: ChannelWiringOpts): ChannelWiring {
   const { doc, view, dm } = opts;
@@ -94,13 +105,13 @@ export function wireChannels(opts: ChannelWiringOpts): ChannelWiring {
   let generalSeenOnce = false;
 
   /** The server refused this reader #general (`LeadChatState.ownersOnly`). */
-  let generalRefused = false;
+  let generalIsRefused = false;
   const has = (id: string): boolean => dm.state().channels.some((c) => c.id === id);
   /** The channel shown, once the list says it still exists. A reader refused
    *  #general opens on a conversation they can use, a person's first. */
   const shown = (): string => {
     if (current !== GENERAL && has(current)) return current;
-    if (generalRefused) {
+    if (generalIsRefused) {
       const channels = dm.state().channels;
       const open = channels.find((c) => c.kind === 'person') ?? channels[0];
       if (open && !chosen) return open.id;
@@ -177,7 +188,11 @@ export function wireChannels(opts: ChannelWiringOpts): ChannelWiring {
         kind: 'general',
         name: '#general',
         sub: generalSub(leadName, s.ownersOnly === true),
-        ...(lineOf(newest, meId) ? { last: lineOf(newest, meId) } : {}),
+        ...(s.ownersOnly
+          ? { last: GENERAL_REFUSED_LINE }
+          : lineOf(newest, meId)
+            ? { last: lineOf(newest, meId) }
+            : {}),
         unread: generalUnread,
       },
     ];
@@ -199,7 +214,7 @@ export function wireChannels(opts: ChannelWiringOpts): ChannelWiring {
   return {
     current: shown,
     model(s, open) {
-      generalRefused = s.ownersOnly === true;
+      generalIsRefused = s.ownersOnly === true;
       trackGeneral(s, open);
       const showing = shown();
       if (showing !== GENERAL && !dm.state().loaded.has(showing as DmChannelId))
@@ -215,7 +230,7 @@ export function wireChannels(opts: ChannelWiringOpts): ChannelWiring {
           unread: false,
         };
         const picker = { channels: [general], current: GENERAL, menuOpen: false };
-        return { channel: { kind: 'general', sub, empty: GENERAL_REFUSED, picker } };
+        return { channel: { kind: 'general', sub, empty: generalRefused([]), picker } };
       }
       if (!dm.state().ready || dm.state().channels.length === 0 || s.meeting) return {};
       const list = entries(s, open);
@@ -228,7 +243,7 @@ export function wireChannels(opts: ChannelWiringOpts): ChannelWiring {
           channel: {
             kind: 'general',
             sub: entry.sub,
-            ...(s.ownersOnly ? { empty: GENERAL_REFUSED } : {}),
+            ...(s.ownersOnly ? { empty: generalRefused(people(list)) } : {}),
             picker,
           },
         };

@@ -50,12 +50,7 @@ import { collabCoreView } from '../collab-core-switch.ts';
 import { matchRest } from '../middleware/workspace-scope.ts';
 import { proposalReply, proposingAgent } from '../share/access-proposals.ts';
 import { accessPeople } from '../share/access-view.ts';
-import {
-  parseAccessRole,
-  parseRolesMode,
-  seatAndAccess,
-  widensAccess,
-} from '../share/board-access.ts';
+import { parseAccessRole, parseRolesMode, seatAndAccess } from '../share/board-access.ts';
 import { hasOwnerProof } from '../share/owner-proof.ts';
 import { parseShareAudience } from '../share/share-audience.ts';
 import { shareMemberKey } from '../share/share-links.ts';
@@ -176,7 +171,7 @@ export async function handleWorkspaceMembers(
       if (accessRole === 'owner') {
         return j(400, { error: "an entry's level is 'edit', 'comment' or 'view'" });
       }
-      if (widensAccess(levelBefore, accessRole)) {
+      if (shareLinks.raisesAccess(workspaceId, email, accessRole)) {
         const unproven = refuseUnproven('widens what an entry lets people do');
         if (unproven) return unproven;
       }
@@ -209,7 +204,7 @@ export async function handleWorkspaceMembers(
       );
     }
     // View to comment, or either to edit, lets them do more: the owner's own.
-    if (accessBefore !== null && widensAccess(accessBefore, accessRole)) {
+    if (shareLinks.raisesAccess(workspaceId, email, accessRole)) {
       const unproven = refuseUnproven('widens what a member may do');
       if (unproven) return unproven;
     }

@@ -6,7 +6,7 @@
  * every person the board was shared with.
  */
 import { describe, expect, it } from 'vitest';
-import { GENERAL_REFUSED, generalSub } from '../src/lead-chat/lead-chat-channel-wiring.ts';
+import { generalRefused, generalSub } from '../src/lead-chat/lead-chat-channel-wiring.ts';
 import { createLeadChatClient } from '../src/lead-chat/lead-chat-client.ts';
 
 const MSG = {
@@ -53,7 +53,10 @@ describe('who #general says can read it', () => {
     expect(s.ownersOnly).toBe(true);
     expect(s.canTalk).toBe(false);
     expect(generalSub('Lead', true)).toBe('Only the owner and Lead see this');
-    expect(GENERAL_REFUSED).toContain('Only the board’s owner can read this chat');
+    expect(generalRefused([])).toBe('Only the board’s owner can read this chat.');
+    expect(generalRefused(['Alice', 'Bob'])).toBe(
+      'Only the board’s owner can read this chat. Write to Alice or Bob instead.',
+    );
   });
 
   it('drops the chat it held when a later read is refused', async () => {

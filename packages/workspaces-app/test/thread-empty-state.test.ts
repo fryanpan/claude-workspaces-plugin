@@ -81,6 +81,17 @@ describe('thread panel empty state — an unsynced doc is not an empty doc', () 
     expect(bodyText(container)).not.toContain('Loading');
   });
 
+  it('does not tell a Can view reader to leave a comment they cannot send', () => {
+    document.body.classList.add('role-view');
+    cleanups.push(() => document.body.classList.remove('role-view'));
+    const { panel, container } = mountPanel();
+    panel.setThreads([]);
+    panel.markSynced();
+
+    expect(bodyText(container)).toContain('No open comments.');
+    expect(bodyText(container)).not.toContain('leave one');
+  });
+
   it('re-renders on markSynced even though the thread list did not change', () => {
     // The render is memoized on a key computed from the threads. If `synced`
     // is left out of that key, the panel keeps the pre-sync text forever and

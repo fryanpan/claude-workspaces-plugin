@@ -41,7 +41,7 @@ export function levelToast(who: string, before: AccessRole, after: AccessRole): 
 
 /** What the confirmation says before somebody is made an Owner. */
 export function ownerAsk(email: string): string {
-  return `Make ${email} an Owner? They can change everything on this board except who is in it.`;
+  return `Make ${email} an Owner? They can change everything on this board except who has access.`;
 }
 
 /**

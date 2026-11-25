@@ -108,4 +108,21 @@ describe('a domain entry’s level', () => {
     expect(links.accessRoleOf(BOARD, LATE)).toBe('view');
     expect(new ShareLinks({ dataDir }).audienceAccessOf(BOARD, LATE)).toBe('view');
   });
+
+  it('says whether a level change raises anyone, for a person and for an entry', () => {
+    // A person: only a level above their own raises them.
+    links.setAudienceAccess(BOARD, DOMAIN, 'comment');
+    expect(links.raisesAccess(BOARD, EARLY, 'view')).toBe(false);
+    expect(links.raisesAccess(BOARD, EARLY, 'comment')).toBe(false);
+    expect(links.raisesAccess(BOARD, EARLY, 'edit')).toBe(true);
+    expect(links.raisesAccess(BOARD, EARLY, 'owner')).toBe(true);
+    // An entry: its own level going up, or any member it moves going up.
+    links.setMemberRole(BOARD, EARLY, 'member', 'view');
+    expect(links.raisesAccess(BOARD, DOMAIN, 'view')).toBe(false);
+    expect(links.raisesAccess(BOARD, DOMAIN, 'comment')).toBe(true);
+    expect(links.raisesAccess(BOARD, DOMAIN, 'edit')).toBe(true);
+    // Nobody the board holds: counted, so the route answers it.
+    expect(links.raisesAccess(BOARD, '@saltmarsh.example', 'view')).toBe(true);
+    expect(links.raisesAccess(BOARD, 'nobody@saltmarsh.example', 'view')).toBe(true);
+  });
 });

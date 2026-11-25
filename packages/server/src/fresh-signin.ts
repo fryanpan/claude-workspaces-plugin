@@ -26,7 +26,7 @@
  * (doc, attachment set, workspace, any purge); archiving or retiring a
  * workspace, archiving a doc or an attachment set; and every widening of
  * access — a new share or share link, someone added to a board's audience, an
- * access card approved, sharing switched on, a role raised, a link
+ * access card approved, sharing switched on, a role raised above where it stands, a link
  * lengthened, a board unlocked. Task and goal archives, every unarchive,
  * and every narrowing of access stay instant. Where the body decides which
  * way a call goes, only the explicitly narrowing value is exempt, so a body
@@ -36,9 +36,10 @@
  */
 import { countedRouteOf, trimTrailingSlashes } from '@claude-workspaces/core/counted-routes';
 import type { IdentityRecord } from './identities.ts';
-import { normalizeBoardRole } from './share/board-role.ts';
+import { type AccessRole, parseAccessRole } from './share/board-access.ts';
 import type { Shares } from './share/shares.ts';
 import { resolveTtl } from './share/ttl.ts';
+import { safeDecodeSegment } from './workspace-path.ts';
 
 /** How long a sign-in stays fresh, in seconds. */
 export const FRESH_SIGNIN_WINDOW_SECONDS = 600;
@@ -88,6 +89,11 @@ export interface CountedActionContext {
   /** The retired per-share registry, for whether a TTL change lengthens. */
   shares: Shares | null;
   now: number;
+  /**
+   * Whether a level change raises anyone (`ShareLinks.raisesAccess`). Absent,
+   * every level change is counted.
+   */
+  raisesAccess?: (workspaceId: string, match: string, role: AccessRole) => boolean;
 }
 
 /** The body as JSON, read off a clone so the route still gets its own. */
@@ -119,7 +125,7 @@ export async function countedActionOf(
     case 'retire-workspace':
       return (await bodyOf(req))?.retired === false ? null : route;
     case 'raise-role':
-      return normalizeBoardRole((await bodyOf(req))?.role) === 'member' ? null : route;
+      return (await raisesRole(req, pathname, ctx)) ? route : null;
     case 'add-member': {
       const body = await bodyOf(req);
       const removeOnly = body !== null && (body.add === undefined || isEmptyArray(body.add));
@@ -138,6 +144,22 @@ export async function countedActionOf(
     default:
       return route;
   }
+}
+
+/**
+ * Whether a level change lets anyone do more. A lowering, or re-posting the
+ * level they already have, stays instant; a role the route will refuse, or a
+ * server that cannot look the target up, is counted.
+ */
+async function raisesRole(
+  req: Request,
+  pathname: string,
+  { raisesAccess }: CountedActionContext,
+): Promise<boolean> {
+  const role = parseAccessRole((await bodyOf(req))?.role);
+  const parts = trimTrailingSlashes(pathname).split('/');
+  if (!role || !raisesAccess) return true;
+  return raisesAccess(parts[2] ?? '', safeDecodeSegment(parts[4] ?? ''), role);
 }
 
 const isEmptyArray = (v: unknown): boolean => Array.isArray(v) && v.length === 0;
