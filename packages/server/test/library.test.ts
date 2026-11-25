@@ -246,16 +246,28 @@ describe('buildLibrary', () => {
   });
 
   it('dates only what the board made as created; a doc that binds an existing file has none', () => {
-    // `d-made` is a doc the board wrote. `d-bound` filled itself from a file
-    // already on disk, and `library-…` is the open verb's doc from before the
-    // flag existed: neither made anything, so neither is created, whatever
-    // their records say.
+    // `d-made`'s file did not exist until the board wrote it, and `d-sketch`
+    // has no file at all. `d-bound` gave a file already on disk a record, and
+    // `d-legacy` was bound before the flag existed, so it cannot say which:
+    // neither is created, whatever its record says.
+    const file = (id: string) => `/repo/docs/${id}.md`;
     const lib = buildLibrary(
       sources({
         docs: [
-          meta('d-made', { title: 'Saltmarsh plan', createdAt: 1_000 }),
-          meta('d-bound', { title: 'Harborlight readme', createdAt: 9_000, seededFromFile: true }),
-          meta('library-0f1e', { title: 'Riverbend notes', createdAt: 9_100 }),
+          meta('d-made', {
+            title: 'Saltmarsh plan',
+            createdAt: 1_000,
+            sourceUrl: file('d-made'),
+            seededFromFile: false,
+          }),
+          meta('d-sketch', { title: 'Quay sketch', type: 'whiteboard', createdAt: 2_000 }),
+          meta('d-bound', {
+            title: 'Harborlight readme',
+            createdAt: 9_000,
+            sourceUrl: file('d-bound'),
+            seededFromFile: true,
+          }),
+          meta('d-legacy', { title: 'Riverbend notes', createdAt: 9_100, sourceUrl: file('x') }),
         ],
         docKeyOf: (id) => makeDocKey(REPO, `docs/${id}.md`),
         projectRoot: () => null,
@@ -264,6 +276,7 @@ describe('buildLibrary', () => {
     );
     expect(lib.files.map((r) => [r.name, r.created]).sort()).toEqual([
       ['Harborlight readme', undefined],
+      ['Quay sketch', 2_000],
       ['Riverbend notes', undefined],
       ['Saltmarsh plan', 1_000],
     ]);

@@ -253,11 +253,13 @@ export interface DocMeta {
    */
   bindingLostAt?: number;
   /**
-   * True once a bind filled this empty doc from a file that was already on
-   * disk: the doc gave an existing file a record, and the board made
-   * nothing. Never cleared. The Library leaves such a doc
-   * off Recently Created (`createdOnBoard`). Private-meta: it is a fact about
-   * the host's disk, and nothing on the client reads it.
+   * Whether this doc's first bind met a file already on disk. True: an empty
+   * doc took an existing file's content (or met an existing empty file), so
+   * the board made nothing. False: the file did not exist, so the board wrote
+   * it. Unset: never bound, or bound before this field existed. Set once by
+   * `FileBindings.noteFirstFill`; the Library's `createdOnBoard` reads it.
+   * Private-meta: it is a fact about the host's disk, and nothing on the
+   * client reads it.
    */
   seededFromFile?: boolean;
   /**

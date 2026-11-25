@@ -70,6 +70,7 @@ describe('library created time', () => {
     writeFileSync(join(repo, 'handbook.md'), '# Volunteer handbook\n');
     mkdirSync(join(repo, 'docs'));
     writeFileSync(join(repo, 'docs', 'tide-gauge.md'), '# Tide gauge\n');
+    writeFileSync(join(repo, 'docs', 'blank.md'), '');
     git(repo, 'add', '-A');
     git(repo, 'commit', '-q', '-m', 'base');
     handle = createServer({ port: 0, dataDir });
@@ -94,6 +95,20 @@ describe('library created time', () => {
     const { docId } = (await opened.json()) as { docId: string };
     const row = await rowNamed('tide-gauge.md');
     // Positive control: the row is the doc now, so the created rule saw it.
+    expect(row?.docId).toBe(docId);
+    expect(row?.created).toBeUndefined();
+  });
+
+  it('gives no created time to an existing EMPTY file opened from the Library', async () => {
+    // Nothing to seed from, but the file was there before the board.
+    await bindDoc('handbook', join(repo, 'handbook.md'), 'Volunteer handbook');
+    const opened = await at(`/workspaces/${WS}/library/open`, {
+      method: 'POST',
+      body: JSON.stringify({ path: 'docs/blank.md' }),
+    });
+    expect(opened.status).toBe(200);
+    const { docId } = (await opened.json()) as { docId: string };
+    const row = await rowNamed('blank.md');
     expect(row?.docId).toBe(docId);
     expect(row?.created).toBeUndefined();
   });

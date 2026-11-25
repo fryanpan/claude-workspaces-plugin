@@ -21,25 +21,22 @@ export interface ProjectFile {
 /**
  * When the board made this doc, or undefined when it made nothing.
  *
- * Recently Created lists content born on the board: a new board doc, or a
- * new file an agent wrote through the doc tools. A doc whose first bind read
- * its content from a file already on disk (`seededFromFile`) only gave an
- * old file a new record, so it has no created time. No file clock stands in:
+ * Recently Created lists content born on the board: a doc with no file (a
+ * whiteboard, say), or one whose file did not exist until the board wrote
+ * it (`seededFromFile: false`). A doc that only gave a file already on disk
+ * a record has no created time, and neither does a bound doc from before
+ * the flag existed, which cannot say which it was. No file clock stands in:
  * a `git pull` or a fresh clone writes a new file, so a birth time moves
  * with every change that arrives that way, which is how Recently Created
  * came to read as Recently Modified.
- *
- * A `library-` doc is the Library's open verb binding a listed file. Those
- * made before `seededFromFile` existed carry no flag, and the open verb only
- * ever binds a file that is already there.
  */
 export function createdOnBoard(meta: {
-  docId: string;
   createdAt: number;
+  sourceUrl?: string;
   seededFromFile?: boolean;
 }): number | undefined {
-  if (meta.seededFromFile === true || meta.docId.startsWith('library-')) return undefined;
-  return meta.createdAt;
+  if (meta.sourceUrl === undefined || meta.seededFromFile === false) return meta.createdAt;
+  return undefined;
 }
 
 /** How long one repo walk is reused. A Library load is a page view, and a
