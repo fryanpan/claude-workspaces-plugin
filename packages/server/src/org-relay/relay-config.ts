@@ -24,8 +24,13 @@
  *    "server": "<server id>", "board": "<board id>", "agentId": "<agent id>",
  *    "outboxDoc": "<doc the seat posts messages on>",
  *    "inboxDoc": "<doc the relay delivers this seat's messages on>",
- *    "crossOrganization": false, "untrusted": false}}}
+ *    "crossOrganization": false, "untrusted": false,
+ *    "restartFrom": ["<seat id>", …]}}}
  * ```
+ *
+ * `restartFrom` names the seats that may ask for this seat's lead to be
+ * restarted (`restart-lead`, `relay-kinds.ts`). Absent or empty: nobody may.
+ * Each entry must be another configured seat.
  *
  * `baseUrl` may be plain http only on a loopback host (a co-located server,
  * or a test); anything else is https and carries a service token, unless the
@@ -71,6 +76,8 @@ export interface RelaySeat {
   crossOrganization: boolean;
   /** Every message FROM this seat passes the filter, even inside its org. */
   untrusted: boolean;
+  /** The seats that may ask for this seat's lead to be restarted. */
+  restartFrom: string[];
 }
 
 export interface RelayConfig {
@@ -169,6 +176,15 @@ function parseSeat(
     if (raw[k] !== undefined && typeof raw[k] !== 'boolean')
       return `seat ${id} ${k} is not a boolean`;
   }
+  let restartFrom: string[] = [];
+  if (raw.restartFrom !== undefined) {
+    const list = raw.restartFrom;
+    if (!Array.isArray(list) || list.some((v) => typeof v !== 'string' || !ID.test(v))) {
+      return `seat ${id} restartFrom must be a list of seat ids`;
+    }
+    if (list.includes(id)) return `seat ${id} restartFrom names the seat itself`;
+    restartFrom = [...new Set(list as string[])];
+  }
   return {
     id,
     server: server.id,
@@ -179,6 +195,7 @@ function parseSeat(
     inboxDoc: raw.inboxDoc as string,
     crossOrganization: raw.crossOrganization === true,
     untrusted: raw.untrusted === true,
+    restartFrom,
   };
 }
 
@@ -208,6 +225,10 @@ export function parseRelayConfig(raw: string): RelayConfig | { error: string } {
     if (outboxes.has(outbox)) return { error: `seat ${id} shares an outbox with another seat` };
     outboxes.add(outbox);
     seats.set(id, seat);
+  }
+  for (const seat of seats.values()) {
+    const unknown = seat.restartFrom.find((from) => !seats.has(from));
+    if (unknown) return { error: `seat ${seat.id} restartFrom names no seat "${unknown}"` };
   }
   return { servers, seats };
 }

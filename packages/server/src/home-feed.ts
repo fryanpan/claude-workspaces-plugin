@@ -64,6 +64,19 @@ export interface HomeFeedEscalation {
   lead?: string;
 }
 
+/**
+ * The board's lead, as Team Lead elsewhere reads its status
+ * (`lead-status.ts`): who holds the seat, whether that session can be
+ * reached now, and when it last sent a heartbeat and last called a tool. Times and
+ * one plain id, for the reason `HomeFeedEscalation` gives.
+ */
+export interface HomeFeedLead {
+  agentId?: string;
+  live: boolean;
+  lastSeenAt?: number;
+  lastToolCallAt?: number;
+}
+
 export interface HomeFeed {
   v: typeof HOME_FEED_VERSION;
   boardId: string;
@@ -71,6 +84,8 @@ export interface HomeFeed {
   rows: HomeFeedRow[];
   /** Absent while somebody is on the board. Additive: an older Mac drops it. */
   escalation?: HomeFeedEscalation;
+  /** Additive, like `escalation`. */
+  lead?: HomeFeedLead;
 }
 
 /** The longest text each field keeps. Longer is refused, not clipped, so a
@@ -135,6 +150,8 @@ export interface ReadFeed {
   linksRefused: number;
   /** Present only when the remote sent one that passed `readEscalation`. */
   escalation?: HomeFeedEscalation;
+  /** Present only when the remote sent one that passed `readLead`. */
+  lead?: HomeFeedLead;
 }
 
 /** The most stuck tasks an escalation may claim; more is refused. */
@@ -151,13 +168,33 @@ export function readEscalation(raw: unknown): HomeFeedEscalation | undefined {
   if (typeof stuck !== 'number' || !Number.isInteger(stuck) || stuck < 1 || stuck > MAX_STUCK) {
     return undefined;
   }
-  // Any id the server accepts for an agent (`identities.ts`), minus the
-  // controls and bidi overrides no text field here may carry.
-  const lead =
-    typeof e.lead === 'string' && AGENT_ID_RE.test(e.lead) && !UNSAFE_TEXT.test(e.lead)
-      ? e.lead
-      : undefined;
+  const lead = agentId(e.lead);
   return { deadSince, stuck, ...(lead !== undefined ? { lead } : {}) };
+}
+
+/** Any id the server accepts for an agent (`identities.ts`), minus the
+ *  controls and bidi overrides no text field here may carry. */
+function agentId(value: unknown): string | undefined {
+  return typeof value === 'string' && AGENT_ID_RE.test(value) && !UNSAFE_TEXT.test(value)
+    ? value
+    : undefined;
+}
+
+/** The lead's status, or undefined when absent or `live` is not a boolean.
+ *  A bad id or time is dropped alone. */
+export function readLead(raw: unknown): HomeFeedLead | undefined {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const l = raw as Record<string, unknown>;
+  if (typeof l.live !== 'boolean') return undefined;
+  const id = agentId(l.agentId);
+  const lastSeenAt = time(l.lastSeenAt);
+  const lastToolCallAt = time(l.lastToolCallAt);
+  return {
+    ...(id !== undefined ? { agentId: id } : {}),
+    live: l.live,
+    ...(lastSeenAt !== null ? { lastSeenAt } : {}),
+    ...(lastToolCallAt !== null ? { lastToolCallAt } : {}),
+  };
 }
 
 /**
@@ -197,7 +234,15 @@ export function readHomeFeed(
     rows.push(row);
   }
   const escalation = readEscalation(feed.escalation);
-  return { boardName, rows, dropped, linksRefused, ...(escalation ? { escalation } : {}) };
+  const lead = readLead(feed.lead);
+  return {
+    boardName,
+    rows,
+    dropped,
+    linksRefused,
+    ...(escalation ? { escalation } : {}),
+    ...(lead ? { lead } : {}),
+  };
 }
 
 function readRow(entry: unknown): HomeFeedRow | null {
@@ -229,12 +274,13 @@ export function itemHref(item: CrossReviewItem): string {
 }
 
 /** The remote side: one board's open items in the fixed schema, queue order,
- *  and its escalation while nobody is on it. */
+ *  its escalation while nobody is on it, and its lead's status. */
 export function homeFeedOf(
   boardId: string,
   boardName: string,
   items: readonly CrossReviewItem[],
   escalation?: HomeFeedEscalation,
+  lead?: HomeFeedLead,
 ): HomeFeed {
   const rows: HomeFeedRow[] = [];
   for (const item of items) {
@@ -256,5 +302,6 @@ export function homeFeedOf(
     boardName: clip(boardName, LIMITS.boardName),
     rows,
     ...(escalation ? { escalation } : {}),
+    ...(lead ? { lead } : {}),
   };
 }

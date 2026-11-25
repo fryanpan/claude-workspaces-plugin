@@ -48,6 +48,18 @@
  * closed or archived moves the item to the next stuck row in the same tick,
  * since an item on a done ticket is invisible to the reader.
  *
+ * ── Team Lead on another server holds it too ────────────────────────────
+ *
+ * A project machine's Team Lead is on the Mac, which reads this board's home
+ * feed and tells its Team Lead (`remote-escalations.ts`), then says so here
+ * (`holdByRemoteTeamLead`, through `POST …/home-feed/escalation-ack`). While
+ * that word is fresh the owner's item is not filed, and one already standing
+ * is withdrawn: Team Lead first, the owner only when Team Lead cannot be
+ * reached. While a Home elsewhere follows this board's feed
+ * (`feedFollowed`), the item waits a short grace for that word before it is
+ * filed; a board nobody follows files as it always did. If the word stops
+ * coming, the hold lapses and the item is filed.
+ *
  * It goes on the queue through the same door the allow-rule proposals use
  * (`addReviewItem` on the store), so it never passes the quality judge: the
  * judge exists to make an agent's ask readable, and an item generated from
@@ -69,6 +81,17 @@ import type { TaskStore } from './tasks.ts';
  * decision, not a measurement, so `CW_STALL_ESCALATE_MINUTES` overrides it.
  */
 export const STALL_ESCALATE_DEFAULT_MS = 60 * 60_000;
+
+/** How long Team Lead on another server holds the board after its last word.
+ *  The Mac repeats it every five minutes while Team Lead is reachable
+ *  (`REMOTE_ACK_REFRESH_MS` in `remote-escalations.ts`), so three missed in a
+ *  row lapse it. */
+export const REMOTE_HOLD_MS = 15 * 60_000;
+
+/** How long a followed board waits for that word before filing: the Mac
+ *  re-reads a feed within seconds of a change and tells Team Lead on its next
+ *  stall pass, a minute later. */
+export const REMOTE_ACK_GRACE_MS = 5 * 60_000;
 
 /** `<dataDir>/stall-escalations.json` — beside `workspaces/`, like the
  *  allow-rule sidecar and the nudger's stamps. Exported so a test asserts the
@@ -209,6 +232,8 @@ interface Dead {
    *  what the board's home feed tells a Home on another machine. */
   stuck?: number;
   lead?: string;
+  /** When Team Lead on another server last said it holds this stretch. */
+  remoteTeamLeadAt?: number;
 }
 
 type Sidecar = Record<string, { dead: Dead }>;
@@ -243,6 +268,11 @@ export interface StallEscalationOptions {
    *  this a board that recovers with no open item to withdraw stays dead on
    *  that Home until its stream reconnects. */
   onDeadBoardChange?: (workspaceId: string) => void;
+  /** Whether a Home on another machine follows this board's feed, so its
+   *  Team Lead may yet say it holds the board. Absent → nobody does. */
+  feedFollowed?: (workspaceId: string) => boolean;
+  /** Default `REMOTE_ACK_GRACE_MS`. */
+  remoteAckGraceMs?: number;
 }
 
 export class StallEscalations {
@@ -252,6 +282,8 @@ export class StallEscalations {
   private readonly teamLead: TeamLeadReach | undefined;
   private readonly report: (message: string) => void;
   private readonly onDeadBoardChange: ((workspaceId: string) => void) | undefined;
+  private readonly feedFollowed: ((workspaceId: string) => boolean) | undefined;
+  private readonly remoteAckGraceMs: number;
   private sidecar: Sidecar = {};
   /** What the file already holds, so an unchanged sidecar costs no write —
    *  this runs once a minute per board forever. */
@@ -264,6 +296,8 @@ export class StallEscalations {
     this.teamLead = opts.teamLead;
     this.report = opts.report ?? ((message) => console.error(message));
     this.onDeadBoardChange = opts.onDeadBoardChange;
+    this.feedFollowed = opts.feedFollowed;
+    this.remoteAckGraceMs = opts.remoteAckGraceMs ?? REMOTE_ACK_GRACE_MS;
     this.load();
   }
 
@@ -329,7 +363,22 @@ export class StallEscalations {
       }
     }
     const item = dead.filed ? this.liveItem(dead.filed) : undefined;
-    if (dead.filed && item && isReviewItemOpen(item) && !reviewWithdrawn(item.review)) {
+    const itemOpen = item !== undefined && isReviewItemOpen(item) && !reviewWithdrawn(item.review);
+    // Team Lead on another server has it: the owner is not asked.
+    if (dead.remoteTeamLeadAt !== undefined && now - dead.remoteTeamLeadAt < REMOTE_HOLD_MS) {
+      if (dead.filed && itemOpen) {
+        this.withdrawItem(key, dead.filed, 'Team Lead on another server has it');
+      } else if (dead.filed && item) {
+        // A person already answered it: they have seen these rows, so the
+        // hold lapsing must not ask them again.
+        dead.seenRowIds = union(dead.seenRowIds ?? [], dead.filed.rowIds);
+      }
+      dead.filed = undefined;
+      this.sidecar[key] = { dead };
+      this.save();
+      return;
+    }
+    if (dead.filed && itemOpen) {
       this.updateLive(key, dead, rows, deadFor ?? this.escalateMs);
       return;
     }
@@ -341,6 +390,13 @@ export class StallEscalations {
       dead.filed = undefined;
     }
     if (teamLeadBoard !== undefined) {
+      this.sidecar[key] = { dead };
+      this.save();
+      return;
+    }
+
+    // A Home elsewhere follows this board: give its Team Lead a moment.
+    if (!dead.filed && this.followed(key) && now - dead.since < this.remoteAckGraceMs) {
       this.sidecar[key] = { dead };
       this.save();
       return;
@@ -365,6 +421,27 @@ export class StallEscalations {
     const dead = this.sidecar[workspaceId]?.dead;
     if (!dead || !dead.stuck || dead.teamLeadToldAt !== undefined) return undefined;
     return { deadSince: dead.since, stuck: dead.stuck, ...(dead.lead ? { lead: dead.lead } : {}) };
+  }
+
+  /**
+   * Team Lead on another server says it holds the stretch that began at
+   * `deadSince`. True when that is this board's current stretch; a word
+   * about an older one, or a board that is not dead, changes nothing.
+   */
+  holdByRemoteTeamLead(workspaceId: string, deadSince: number, now: number): boolean {
+    const dead = this.sidecar[workspaceId]?.dead;
+    if (!dead || dead.since !== deadSince) return false;
+    dead.remoteTeamLeadAt = now;
+    this.save();
+    return true;
+  }
+
+  private followed(workspaceId: string): boolean {
+    try {
+      return this.feedFollowed?.(workspaceId) === true;
+    } catch {
+      return false;
+    }
   }
 
   /** How many boards hold a live item. Test surface for the pruning that a

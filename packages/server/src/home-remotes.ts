@@ -39,7 +39,12 @@
  */
 import { readFileSync, statSync } from 'node:fs';
 import { parseBoardOrigins } from '../../../infra/board-router-worker/worker.js';
-import { type HomeFeedEscalation, type HomeFeedRow, readHomeFeed } from './home-feed.ts';
+import {
+  type HomeFeedEscalation,
+  type HomeFeedLead,
+  type HomeFeedRow,
+  readHomeFeed,
+} from './home-feed.ts';
 import { BOARD_TOKEN, createHomeRemoteTokens } from './home-remote-tokens.ts';
 import { configuredHostFetch } from './outbound-fetch.ts';
 
@@ -80,6 +85,8 @@ export interface RemoteBoardView {
   /** The board's stall escalation as its server last reported it: present
    *  while nobody is on the board there (`remote-escalations.ts`). */
   escalation?: HomeFeedEscalation;
+  /** The board's lead as its server last reported it (`lead-status.ts`). */
+  lead?: HomeFeedLead;
 }
 
 const TOKEN_PART = /^[A-Za-z0-9._-]{1,256}$/;
@@ -229,6 +236,9 @@ export interface HomeRemotes {
   start(): void;
   /** Every remote board, in table order. */
   boards(): RemoteBoardView[];
+  /** Tell a remote board's server that Team Lead here holds the dead
+   *  stretch that began at `deadSince`; true when it took the word. */
+  acknowledge(boardId: string, deadSince: number): Promise<boolean>;
   dispose(): void;
 }
 
@@ -425,11 +435,32 @@ export function createHomeRemotes(opts: {
     }
   };
 
+  const acknowledge = async (boardId: string, deadSince: number): Promise<boolean> => {
+    if (!views.has(boardId) || disposed) return false;
+    try {
+      const res = await fetchFn(feedUrl(boardId, '/escalation-ack'), {
+        method: 'POST',
+        headers: {
+          ...(await headersFor(boardId, 'application/json')),
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ deadSince }),
+        redirect: 'manual',
+        signal: AbortSignal.timeout(FEED_TIMEOUT_MS),
+      });
+      if (res.status !== 200) return false;
+      return ((await res.json()) as { held?: unknown }).held === true;
+    } catch {
+      return false;
+    }
+  };
+
   return {
     start() {
       for (const boardId of views.keys()) void follow(boardId);
     },
     boards: () => [...views.values()],
+    acknowledge,
     dispose() {
       disposed = true;
       for (const c of controllers) c.abort();

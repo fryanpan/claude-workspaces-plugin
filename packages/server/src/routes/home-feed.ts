@@ -6,6 +6,10 @@
  *   GET /workspaces/:ws/home-feed/events:stream  `landing.changed` frames, no
  *                                                content, when any item may
  *                                                have moved
+ *   POST /workspaces/:ws/home-feed/escalation-ack  `{deadSince}`: Team Lead
+ *                                                there holds this board's dead
+ *                                                stretch, so its owner item
+ *                                                is not filed (`stall-escalation.ts`)
  *
  * A project server answers these; the Mac's server is the only intended
  * caller, and it calls OUT (`home-remotes.ts`). Both paths sit under
@@ -45,6 +49,7 @@
  * and the stream frames name no board and no content (`landing-changes.ts`).
  */
 import { type BoardAgentClaims, boardAgentBearerOf } from '../auth/board-agent-token.ts';
+import type { HomeFeedFollowers } from '../home-feed-followers.ts';
 import type { HomeFeed } from '../home-feed.ts';
 import { LANDING_CHANNEL } from '../landing-changes.ts';
 import type { CfAccessVerifier } from '../middleware/cf-access.ts';
@@ -52,7 +57,8 @@ import { isLoopbackAddress } from '../middleware/host-guard.ts';
 import { isBrowserRequest } from '../middleware/write-gate.ts';
 import { type SseBus, openSseStream } from '../sse.ts';
 
-const FEED_PATH = /^\/workspaces\/([A-Za-z0-9_-]{1,128})\/home-feed(\/events:stream)?$/;
+const FEED_PATH =
+  /^\/workspaces\/([A-Za-z0-9_-]{1,128})\/home-feed(\/events:stream|\/escalation-ack)?$/;
 
 export interface HomeFeedRoutesContext {
   sse: SseBus;
@@ -72,6 +78,14 @@ export interface HomeFeedRoutesContext {
   accessInFront?: () => boolean;
   /** The external-access master switch (`SharingGate.isEnabled`). */
   externalAccessOpen: () => boolean;
+  /** Team Lead on the caller's machine holds the stretch that began at
+   *  `deadSince`; true when that is the board's current one. Absent → 404. */
+  ackEscalation?: (workspaceId: string, deadSince: number) => boolean;
+  /** Team Lead's agent id on this server (`spawnerAgentId`): with no Access
+   *  in front, the only agent whose `at2` may send the escalation ack. */
+  teamLeadAgentId?: () => string | undefined;
+  /** Who follows which board's feed (`home-feed-followers.ts`). */
+  followers?: HomeFeedFollowers;
   j: (status: number, body: unknown) => Response;
 }
 
@@ -97,28 +111,66 @@ export function refuseWhileExternalAccessOff(
   return ctx.j(403, { error: 'sharing_disabled' });
 }
 
+type CallerContext = Pick<
+  HomeFeedRoutesContext,
+  'verifier' | 'clientId' | 'peerAddress' | 'boardGrantFor' | 'accessInFront' | 'teamLeadAgentId'
+>;
+
 /** Whether this caller may read a home feed. Never says which check failed. */
 export async function homeFeedCallerAllowed(
-  ctx: Pick<
-    HomeFeedRoutesContext,
-    'verifier' | 'clientId' | 'peerAddress' | 'boardGrantFor' | 'accessInFront'
-  >,
+  ctx: CallerContext,
   req: Request,
   /** The board the path names; without one, no board token admits. */
   boardId?: string,
 ): Promise<boolean> {
   if (!req.headers.has('cf-ray')) return isLoopbackAddress(ctx.peerAddress(req));
-  // With no Access in front, the board's own token is the proof. Where Access
-  // is in front, only the feed's service token is, with or without one.
+  return macCallerAllowed(ctx, req, boardId);
+}
+
+/**
+ * The Mac's own credential, through the tunnel. With no Access in front, the
+ * board's `at2` is the proof, and `agentId`, when given, must be the agent it
+ * was minted for. Where Access is in front, only the feed's service token
+ * is, with or without one.
+ */
+async function macCallerAllowed(
+  ctx: CallerContext,
+  req: Request,
+  boardId: string | undefined,
+  agentId?: string,
+): Promise<boolean> {
   if (ctx.accessInFront?.() === false) {
     const bearer = boardAgentBearerOf(req.headers);
     if (bearer === null || !boardId || !ctx.boardGrantFor) return false;
     if (isBrowserRequest(req.headers)) return false;
-    return ctx.boardGrantFor(bearer)?.boardId === boardId;
+    const grant = ctx.boardGrantFor(bearer);
+    if (grant?.boardId !== boardId) return false;
+    return agentId === undefined || grant.agentId === agentId;
   }
   if (!ctx.verifier || !ctx.clientId) return false;
   const result = await ctx.verifier(req);
   return result.ok && result.email === undefined && result.commonName === ctx.clientId;
+}
+
+/**
+ * Who may tell this board that Team Lead on the Mac holds it: the Mac and
+ * nobody else. Unlike a feed read, a loopback caller is refused, since a
+ * process on this machine (the dead board's own lead among them) must not
+ * be able to keep the owner's item off; and with no Access in front the
+ * `at2` must be one minted for Team Lead, not the board's lead's.
+ */
+export async function escalationAckCallerAllowed(
+  ctx: CallerContext,
+  req: Request,
+  boardId: string,
+): Promise<boolean> {
+  if (!req.headers.has('cf-ray')) return false;
+  if (ctx.accessInFront?.() === false) {
+    const teamLead = ctx.teamLeadAgentId?.();
+    if (!teamLead) return false;
+    return macCallerAllowed(ctx, req, boardId, teamLead);
+  }
+  return macCallerAllowed(ctx, req, boardId);
 }
 
 export async function handleHomeFeedRoute(
@@ -131,12 +183,21 @@ export async function handleHomeFeedRoute(
   const boardId = m[1] as string;
   const shut = refuseWhileExternalAccessOff(ctx, req);
   if (shut) return shut;
+  if (m[2] === '/escalation-ack') {
+    if (!(await escalationAckCallerAllowed(ctx, req, boardId))) {
+      return ctx.j(403, { error: 'forbidden' });
+    }
+    return ackRoute(ctx, req, boardId);
+  }
   if (!(await homeFeedCallerAllowed(ctx, req, boardId))) {
     return ctx.j(403, { error: 'forbidden' });
   }
   if (req.method !== 'GET') return ctx.j(405, { error: 'method-not-allowed' });
   if (ctx.boardName(boardId) === undefined) return ctx.j(404, { error: 'not_found' });
   if (m[2]) {
+    // Closed when the caller goes: a follower is one holding the stream.
+    const close = ctx.followers?.opened(boardId);
+    if (close) req.signal.addEventListener('abort', close, { once: true });
     // A tunnel caller's stream is marked so the master switch hangs it up
     // when external access goes off; the check above only stops new ones.
     const external = req.headers.has('cf-ray');
@@ -152,5 +213,49 @@ export async function handleHomeFeedRoute(
       external,
     );
   }
+  ctx.followers?.read(boardId);
   return ctx.j(200, await ctx.feed(boardId));
+}
+
+/** The most bytes an acknowledgement body may be. */
+const MAX_ACK_BYTES = 256;
+
+/** The body as text, or null once it passes `max` bytes; never reads more
+ *  than one chunk past the cap. */
+async function readBounded(req: Request, max: number): Promise<string | null> {
+  if (Number(req.headers.get('content-length') ?? 0) > max) return null;
+  if (!req.body) return '';
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  return new TextDecoder().decode(Buffer.concat(chunks));
+}
+
+async function ackRoute(ctx: HomeFeedRoutesContext, req: Request, boardId: string) {
+  if (req.method !== 'POST') return ctx.j(405, { error: 'method-not-allowed' });
+  if (!ctx.ackEscalation || ctx.boardName(boardId) === undefined) {
+    return ctx.j(404, { error: 'not_found' });
+  }
+  const raw = await readBounded(req, MAX_ACK_BYTES);
+  if (raw === null) return ctx.j(413, { error: 'too_large' });
+  let deadSince: unknown;
+  try {
+    deadSince = (JSON.parse(raw) as { deadSince?: unknown })?.deadSince;
+  } catch {
+    return ctx.j(400, { error: 'bad_json' });
+  }
+  if (typeof deadSince !== 'number' || !Number.isSafeInteger(deadSince) || deadSince <= 0) {
+    return ctx.j(400, { error: 'bad_dead_since' });
+  }
+  return ctx.j(200, { held: ctx.ackEscalation(boardId, deadSince) });
 }

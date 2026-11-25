@@ -67,6 +67,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/api/github-push-keys` | POST | `routes/github-hub.ts` | loopback-only |  |
 | `/api/goals` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
 | `/api/goals/*` | GET, POST, PUT, DELETE | `routes/stale-client.ts` | trusted-local |  |
+| `/api/home-remotes` | GET | `routes/ops.ts` | trusted-local |  |
 | `/api/load-reports` | POST | `routes/load-reports.ts` | trusted-local |  |
 | `/api/load-reports/slowest` | GET | `routes/load-reports.ts` | loopback-only |  |
 | `/api/me/messages` | GET, POST | `routes/private-messages.ts` | trusted-local |  |
@@ -308,6 +309,7 @@ refuses it. The gate vocabulary is [security.md](security.md).
 | `/workspaces/:ws/goals/reorder` | POST | `routes/workspace-goals.ts` | share-scope |  |
 | `/workspaces/:ws/home` | GET | `routes/workspace-home.ts` | share-scope |  |
 | `/workspaces/:ws/home-feed` | GET | `routes/home-feed.ts` | home-feed |  |
+| `/workspaces/:ws/home-feed/escalation-ack` | POST | `routes/home-feed.ts` | home-feed |  |
 | `/workspaces/:ws/home-feed/events:stream` | GET | `routes/home-feed.ts` | home-feed |  |
 | `/workspaces/:ws/home/instructions` | PUT | `routes/workspace-home.ts` | share-scope |  |
 | `/workspaces/:ws/home/read` | POST | `routes/workspace-home.ts` | share-scope |  |

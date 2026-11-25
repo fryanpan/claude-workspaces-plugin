@@ -28,7 +28,17 @@
  *    classifier. Held messages wait for Bryan in the hold queue and never
  *    reach the lead until he releases one.
  *  - **delivered**: posted on the recipient's inbox doc as quoted data,
- *    marked with the sender's seat and organization.
+ *    marked with the sender's seat and organization, and addressed to the
+ *    recipient seat's agent, so it reaches that agent's stream (or waits on
+ *    its comment queue) whether or not it watches the inbox doc. A board
+ *    that does not list the agent as attached refuses the address; the
+ *    relay then delivers unaddressed, which still reaches the board's lead.
+ *
+ * The line after `to:` may name a kind (`relay-kinds.ts`): a dispatch of one
+ * task, a wake, or a restart request. A restart request is refused unless
+ * the recipient seat's `restartFrom` names the sender, and is delivered
+ * unaddressed as one fixed line for the project machine's supervisor
+ * (`infra/project-machine/lead-restart.ts`) to act on.
  *
  * A delivery that fails in transit gets no verdict and is tried again on the
  * next pass, so a recipient server that is down loses nothing.
@@ -45,6 +55,7 @@ import {
 } from './relay-client.ts';
 import type { RelayConfig, RelaySeat } from './relay-config.ts';
 import type { RelayFilter } from './relay-filter.ts';
+import { type RelayKind, parseRelayKind } from './relay-kinds.ts';
 import type { RelayStore, RelayVerdict } from './relay-log.ts';
 import { applyOrganizationRule, deliveredText, fixedCheckHit } from './relay-rule.ts';
 
@@ -52,6 +63,7 @@ export interface RelayMessage {
   id: string;
   from: string;
   to: string;
+  /** Everything after the `to:` line, the kind's own line included. */
   text: string;
 }
 
@@ -173,7 +185,14 @@ export function createRelay(opts: RelayOptions): Relay {
     }
   }
 
-  async function deliver(m: RelayMessage, from: RelaySeat, to: RelaySeat, cross: boolean) {
+  async function deliver(
+    m: RelayMessage,
+    from: RelaySeat,
+    to: RelaySeat,
+    cross: boolean,
+    kind: RelayKind,
+    text: string,
+  ) {
     const server = config.servers.get(to.server);
     if (!server) return false;
     return deliverToInbox(
@@ -181,14 +200,22 @@ export function createRelay(opts: RelayOptions): Relay {
       server,
       to.board,
       to.inboxDoc,
-      deliveredText(from, cross, m.text),
+      deliveredText(from, cross, text, kind, to),
       `relay-${m.id}`,
+      // A restart is for the machine's supervisor, not the session it ends.
+      kind.kind === 'restart' ? undefined : to.agentId,
     );
   }
 
   async function handle(m: RelayMessage): Promise<RelayOutcome> {
     if (handled.has(m.id)) return { verdict: 'refused', reason: 'duplicate' };
-    const rule = applyOrganizationRule(config, m.from, m.to, m.text);
+    const parsedKind = parseRelayKind(m.text);
+    if ('refuse' in parsedKind) {
+      record(m, 'refused', config.seats.get(m.from), config.seats.get(m.to), parsedKind.refuse);
+      return { verdict: 'refused', reason: parsedKind.refuse };
+    }
+    const { kind, text } = parsedKind;
+    const rule = applyOrganizationRule(config, m.from, m.to, text, kind);
     if (rule.kind === 'refuse') {
       record(m, 'refused', config.seats.get(m.from), config.seats.get(m.to), rule.reason);
       return { verdict: 'refused', reason: rule.reason };
@@ -210,7 +237,7 @@ export function createRelay(opts: RelayOptions): Relay {
       }
       passed.add(m.id);
     }
-    if (!(await deliver(m, from, to, crossOrganization))) {
+    if (!(await deliver(m, from, to, crossOrganization, kind, text))) {
       if (!failedOnce.has(m.id)) log(`[relay] delivery of ${m.id} to ${to.id} failed; will retry`);
       failedOnce.add(m.id);
       return { verdict: 'failed', reason: 'delivery-failed' };
@@ -279,10 +306,13 @@ export function createRelay(opts: RelayOptions): Relay {
       if (!held) return 'not-held';
       // The rule is asked again: a seat whose access was withdrawn since
       // the hold does not get its message through by a release.
-      const rule = applyOrganizationRule(config, held.from, held.to, held.text);
+      const parsedKind = parseRelayKind(held.text);
+      if ('refuse' in parsedKind) return 'refused';
+      const { kind, text } = parsedKind;
+      const rule = applyOrganizationRule(config, held.from, held.to, text, kind);
       if (rule.kind === 'refuse') return 'refused';
       const { from, to } = rule;
-      const ok = await deliver(held, from, to, rule.crossOrganization);
+      const ok = await deliver(held, from, to, rule.crossOrganization, kind, text);
       if (!ok) return 'failed';
       store.append({
         ts: now(),

@@ -31,6 +31,7 @@ import type { OwnerSignIn } from '../auth/owner-signin-record.ts';
  */
 import type { Deployer } from '../deploy.ts';
 import type { DocStore } from '../doc-store.ts';
+import type { RemoteBoardView } from '../home-remotes.ts';
 import type { ServerLiveness } from '../liveness.ts';
 import { isLoopbackAddress } from '../middleware/host-guard.ts';
 import type { ShareTarget } from '../middleware/host-guard.ts';
@@ -73,6 +74,9 @@ export interface OpsRoutesContext {
   /** How long blocking asks waited for an answer over the last week, read
    *  off the answer ledger per request for the same reason. */
   blockingWait: () => BlockingWait;
+  /** The boards on other servers this Home follows, or null when it follows
+   *  none (`home-remotes.ts`). Read per request: the views are live. */
+  remoteBoards: () => readonly RemoteBoardView[] | null;
 
   /**
    * Whether THIS server is bound and discoverable, right now — the second,
@@ -136,6 +140,28 @@ export function handleOpsMetricsRoute(
     });
   }
   return undefined;
+}
+
+/**
+ * `GET /api/home-remotes` — the boards on other servers this Home follows,
+ * for Team Lead: whether each was reached, its lead's status and its stall
+ * escalation, and how many items wait there. No remote text: the item rows
+ * stay on Home, where they are rendered with the remote's links checked.
+ */
+export function handleHomeRemotesRoute(
+  ctx: OpsRoutesContext,
+  rq: OpsRouteRequest,
+): Response | undefined {
+  if (rq.pathname !== '/api/home-remotes' || rq.req.method !== 'GET') return undefined;
+  if (rq.visitor) return ctx.j(403, { error: 'not available to share visitors' });
+  const boards = (ctx.remoteBoards() ?? []).map((v) => ({
+    boardId: v.boardId,
+    reached: v.reached,
+    waiting: v.rows.length,
+    ...(v.lead ? { lead: v.lead } : {}),
+    ...(v.escalation ? { escalation: v.escalation } : {}),
+  }));
+  return ctx.j(200, { boards });
 }
 
 /**

@@ -94,6 +94,7 @@ import { frameKeys } from './frame-ticket.ts';
 import { personProofOf, refuseStaleSignIn } from './fresh-signin.ts';
 import { GithubHub, githubHubPath } from './github-hub.ts';
 import { taskDeepLink } from './home-brief.ts';
+import { HomeFeedFollowers } from './home-feed-followers.ts';
 import { homeFeedOf } from './home-feed.ts';
 import { createHomePane } from './home-pane.ts';
 import { HOME_REMOTE_TOKENS_FILE } from './home-remote-tokens.ts';
@@ -113,6 +114,7 @@ import { LeadChatMeetings } from './lead-chat/meeting.ts';
 import { LeadSessionMirror } from './lead-chat/mirror.ts';
 import { LeadPane } from './lead-chat/pane.ts';
 import { wireLeadRanks } from './lead-rank-wiring.ts';
+import { leadStatusOf } from './lead-status.ts';
 import { createMarkdownLister, projectRepoKey } from './library.ts';
 import { describeLiveness } from './liveness.ts';
 import { type LookupDoc, boardLookupDocs } from './meeting-lookup.ts';
@@ -1263,6 +1265,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     opts.spawnerAgentId === null
       ? undefined
       : (opts.spawnerAgentId ?? process.env.CW_SPAWNER_AGENT_ID ?? DEFAULT_SPAWNER_AGENT_ID);
+  /** Which boards a Home on another machine follows — routes/home-feed.ts. */
+  const homeFeedFollowers = new HomeFeedFollowers();
   const stallWiring = createStallWiring({
     taskStore,
     taskProjection,
@@ -1289,6 +1293,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       ? { stallNudgeRepeatMs: opts.stallNudgeRepeatMs }
       : {}),
     ...(opts.stallEscalateMs !== undefined ? { stallEscalateMs: opts.stallEscalateMs } : {}),
+    ...(opts.stallRemoteAckGraceMs !== undefined
+      ? { stallRemoteAckGraceMs: opts.stallRemoteAckGraceMs }
+      : {}),
     ...(spawnerAgentId !== undefined ? { spawnerAgentId } : {}),
     ...(opts.heldReviewItemMs !== undefined ? { heldReviewItemMs: opts.heldReviewItemMs } : {}),
     ...(opts.heldReleaseMs !== undefined ? { heldReleaseMs: opts.heldReleaseMs } : {}),
@@ -1302,9 +1309,12 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           remoteBoards: {
             views: () => homeRemotes.boards(),
             originOf: (id: string) => opts.homeRemotes?.config.table.get(id),
+            acknowledge: (id: string, deadSince: number) => homeRemotes.acknowledge(id, deadSince),
           },
         }
       : {}),
+    // …and a board here followed from another machine waits for its word.
+    feedFollowed: (id) => homeFeedFollowers.followed(id),
   });
   const { leadPresence, readyNudger, stallNudger } = stallWiring;
 
@@ -2501,6 +2511,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         taskStore.getWorkspace(id)?.name ?? id,
         items,
         stallWiring.deadBoard(id),
+        leadStatusOf(taskStore, id),
       );
     },
     verifier: staticAccessVerifier,
@@ -2508,10 +2519,13 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     peerAddress: (req) => server.requestIP(req)?.address ?? undefined,
     // `at2` only: a board-scoped token for the board the feed path names.
     boardGrantFor: (bearer) => (bearer.startsWith('at2.') ? boardAgentTokens.verify(bearer) : null),
+    teamLeadAgentId: () => spawnerAgentId,
     accessInFront: () => signInDoor.effectiveMode() !== 'better-auth',
     // These families answer above admission, so they ask the master switch
     // themselves (`refuseWhileExternalAccessOff`, routes/home-feed.ts).
     externalAccessOpen: () => sharingGate.isEnabled(),
+    ackEscalation: (id, deadSince) => stallWiring.holdByRemoteTeamLead(id, deadSince),
+    followers: homeFeedFollowers,
     j,
   };
 
@@ -2629,6 +2643,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       const now = Date.now();
       return blockingWait(crossReview.ledger.read(now - BLOCKING_WAIT_WINDOW_MS), now);
     },
+    remoteBoards: () => (homeRemotes ? homeRemotes.boards() : null),
     // The OTHER claim `GET /api/deploy` answers: not "did the last deploy
     // come up" but "is this process bound and discoverable, now". Both halves
     // are read per request — `Bun.serve` has not returned when this object is
