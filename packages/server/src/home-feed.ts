@@ -26,6 +26,7 @@ import { pageThreadHref } from '@claude-workspaces/core/page-thread-link';
 import { boardIdOfPath } from '../../../infra/board-router-worker/worker.js';
 import type { CrossReviewItem } from './cross-review-queue.ts';
 import { taskDeepLink } from './home-brief.ts';
+import { AGENT_ID_RE } from './identities.ts';
 
 export const HOME_FEED_VERSION = 1;
 
@@ -138,8 +139,6 @@ export interface ReadFeed {
 
 /** The most stuck tasks an escalation may claim; more is refused. */
 const MAX_STUCK = 10_000;
-/** An agent id as the board writes one: no spaces, no markup, no controls. */
-const AGENT_ID = /^[A-Za-z0-9._:@-]{1,128}$/;
 
 /** The escalation, or undefined when it is absent or any number is bad. A
  *  bad lead id is dropped alone: the board is still dead without it. */
@@ -152,7 +151,12 @@ export function readEscalation(raw: unknown): HomeFeedEscalation | undefined {
   if (typeof stuck !== 'number' || !Number.isInteger(stuck) || stuck < 1 || stuck > MAX_STUCK) {
     return undefined;
   }
-  const lead = typeof e.lead === 'string' && AGENT_ID.test(e.lead) ? e.lead : undefined;
+  // Any id the server accepts for an agent (`identities.ts`), minus the
+  // controls and bidi overrides no text field here may carry.
+  const lead =
+    typeof e.lead === 'string' && AGENT_ID_RE.test(e.lead) && !UNSAFE_TEXT.test(e.lead)
+      ? e.lead
+      : undefined;
   return { deadSince, stuck, ...(lead !== undefined ? { lead } : {}) };
 }
 

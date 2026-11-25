@@ -561,6 +561,10 @@ What a dead board says, and to whom — in order:
   it stands, and the Mac's stall pass sends Team Lead one frame per dead
   stretch about it (`remote-escalations.ts`), with `remote` naming the
   origin and the MCP line saying to restart the lead on its own machine.
+  The feed carries it only while this server's own Team Lead was not told,
+  so a Team Lead attached on both servers hears once, and the board
+  announces a Home change whenever what the feed reports appears or goes,
+  so the Mac re-reads it even when nothing on the queue moved.
   The reader's item still stands, because the machine cannot tell that the
   Mac told anybody.
 - **The reader only when Team Lead is unreachable too.** Then the board files

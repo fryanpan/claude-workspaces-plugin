@@ -1295,6 +1295,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     ...(opts.keepMovingCadenceMs !== undefined
       ? { keepMovingCadenceMs: opts.keepMovingCadenceMs }
       : {}),
+    notifyLanding: () => landingChanges.notify('boards'),
     // A dead board on another server reaches Team Lead here off its feed.
     ...(homeRemotes && opts.homeRemotes
       ? {

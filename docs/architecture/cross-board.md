@@ -118,8 +118,9 @@ The machine's home feed carries the board's escalation while it stands
 stuck, the lead's agent id), and the Mac's stall pass hands each remote
 board's view to `remote-escalations.ts` (Keep-moving group), which sends
 Team Lead one `workspace.stalled` frame per dead stretch with a `remote`
-field naming the origin. It rides the existing pull; nothing new calls the
-Mac. Tests: `remote-escalations.test.ts`,
+field naming the origin. The board announces a Home change whenever the
+escalation its feed reports appears or goes, so the Mac re-reads it then. It
+rides the existing pull; nothing new calls the Mac. Tests: `remote-escalations.test.ts`,
 `remote-escalation-across-servers.test.ts`.
 
 **GitHub events for boards on other machines.** GitHub is read once, by the
