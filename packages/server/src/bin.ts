@@ -271,8 +271,8 @@ if (
   process.exit(2);
 }
 
-// The local test sign-in replaces the operator lists and the sign-in it
-// would otherwise run: Alice and Bob through a fake Google on loopback.
+// The local test sign-in replaces the operator lists (`CW_SIGNIN` is refused
+// beside it): Alice and Bob through a fake Google on loopback.
 const testGoogle = testSignIn ? startTestGoogle(testSignIn) : null;
 const testOpts =
   testSignIn && testGoogle ? testSignInOptions(testSignIn, testGoogle.endpoints) : null;
@@ -336,7 +336,7 @@ while (!handle) {
       // …and the environment it runs in, the same string the server stamps.
       ...(sentryDsn ? { sentryEnvironment } : {}),
       cfAccess,
-      ...(signIn && !testOpts ? { signIn } : {}),
+      ...(signIn ? { signIn } : {}),
       // The share hostname and the audience of the ONE Access application in
       // front of it. Passed only when BOTH resolved: `resolveServerConfig`
       // already said loudly why it refused, and handing the list over without

@@ -285,8 +285,11 @@ export function createAccessDeps(ctx: AccessDepsContext) {
    * is named as the operator; bin.ts also refuses at boot, but this check is
    * the one in the request path.
    */
+  // The local test sign-in's address is not on the list (it must not
+  // classify through the edge), but it is verified the same way.
   const proxiedTrustedVerifier =
-    (opts.proxiedTrustedHosts ?? []).length > 0 && proxiedTrustedEmails.size > 0
+    ((opts.proxiedTrustedHosts ?? []).length > 0 || signInDoor.localHost !== null) &&
+    proxiedTrustedEmails.size > 0
       ? staticAccessVerifier
       : null;
   // The list as the gate and the origin policy see it: EMPTY unless everything

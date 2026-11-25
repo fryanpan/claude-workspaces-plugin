@@ -46,12 +46,24 @@ describe('testSignInFromEnv', () => {
     expect('error' in resolved && resolved.error).toContain('8787');
   });
 
-  it('refuses when a real Google client id is set', () => {
-    const resolved = testSignInFromEnv(
-      { ...ON, CW_GOOGLE_CLIENT_ID: 'riverbend.apps.example' },
-      LOOPBACK,
-    );
-    expect('error' in resolved && resolved.error).toContain('CW_GOOGLE_CLIENT_ID');
+  it('refuses when a real Google client id or secret is set', () => {
+    for (const google of [
+      { CW_GOOGLE_CLIENT_ID: 'riverbend.apps.example' },
+      { CW_GOOGLE_CLIENT_SECRET: 'fixture-Saltmarsh' },
+    ]) {
+      const resolved = testSignInFromEnv({ ...ON, ...google }, LOOPBACK);
+      expect('error' in resolved && resolved.error).toContain('CW_GOOGLE_CLIENT_ID');
+    }
+  });
+
+  it('refuses a value other than 1, and port 0', () => {
+    expect('error' in testSignInFromEnv({ CW_TEST_SIGNIN: 'yes' }, LOOPBACK)).toBe(true);
+    expect('error' in testSignInFromEnv(ON, { port: 0, bindHost: '127.0.0.1' })).toBe(true);
+  });
+
+  it('CONTROL: runs beside CW_SIGNIN=access, the default', () => {
+    const resolved = testSignInFromEnv({ ...ON, CW_SIGNIN: 'access' }, LOOPBACK);
+    expect('setting' in resolved && resolved.setting !== null).toBe(true);
   });
 
   it('refuses beside another CW_SIGNIN mode', () => {
@@ -68,11 +80,19 @@ describe('testSignInFromEnv', () => {
 });
 
 describe('the sign-in address in the host guard', () => {
+  // The option set the server runs with: the setting's own operator list,
+  // armed as it is at run time.
+  const { proxiedTrustedHosts } = testSignInOptions(
+    { origin: `http://${TEST_SIGNIN_HOST}:${PORT}`, owner: TEST_SIGNIN_OWNER },
+    { authorizationUrl: '', tokenUrl: '', userInfoUrl: '' },
+  );
   const classify = (viaProxy: boolean, loopbackPeer: boolean) =>
     classifyHost(`${TEST_SIGNIN_HOST}:${PORT}`, {
       accessOnly: true,
+      accessFronted: true,
       viaProxy,
       loopbackPeer,
+      proxiedTrustedHosts,
       localSignInHosts: [TEST_SIGNIN_HOST],
       lookupShare: () => null,
     }).kind;
@@ -176,7 +196,6 @@ describe('a server running the test sign-in', () => {
     const { jar, callback } = await signInAs('alice');
     expect(callback.status).toBe(302);
     expect(callback.headers.get('location')).toBe('/workspaces');
-    expect(TEST_SIGNIN_OWNER).toBe(ALICE);
     const res = await browser(`/workspaces/${board}?format=json`, {
       headers: { cookie: jar.header() },
     });
@@ -199,6 +218,7 @@ describe('a server running the test sign-in', () => {
   it('refuses the sign-in page on a request that came through Cloudflare', async () => {
     const res = await browser('/auth/sign-in', { headers: CF_RAY });
     expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: 'unknown_host' });
     // CONTROL: the same request without cf-ray is the page.
     expect((await browser('/auth/sign-in')).status).toBe(200);
   });
@@ -208,8 +228,8 @@ describe('a server running the test sign-in', () => {
     const res = await browser(`/workspaces/${board}?format=json`, {
       headers: { cookie: jar.header(), ...CF_RAY },
     });
-    expect(res.status).not.toBe(200);
-    expect(await res.text()).not.toContain('Harborlight partners');
+    expect(res.status).toBe(403);
+    expect(await res.json()).toEqual({ error: 'unknown_host' });
   });
 
   it('the fake Google refuses cf-ray and a return address that is not the sign-in callback', async () => {

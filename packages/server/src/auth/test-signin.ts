@@ -82,7 +82,9 @@ export function testSignInFromEnv(
 /** The `createServer` options the setting stands for, once the fake Google is up. */
 export function testSignInOptions(setting: TestSignInSetting, endpoints: GoogleEndpoints) {
   return {
-    proxiedTrustedHosts: [TEST_SIGNIN_HOST],
+    // Empty on purpose: a name on this list classifies through the edge. The
+    // sign-in address classifies by `localSignInHosts` instead, loopback only.
+    proxiedTrustedHosts: [],
     proxiedTrustedEmails: [setting.owner],
     signIn: {
       mode: 'better-auth' as const,
@@ -139,6 +141,7 @@ export function startTestGoogle(setting: TestSignInSetting): TestGoogle {
         back.searchParams.set('state', String(form?.get('state') ?? ''));
         return new Response(null, { status: 303, headers: { location: back.toString() } });
       }
+      // A fake: no client secret, PKCE or code expiry is checked. Do not copy.
       if (url.pathname === '/token' && req.method === 'POST') {
         const form = new URLSearchParams(await req.text());
         if (form.get('client_id') !== CLIENT) return refuse(401, 'invalid_client');
