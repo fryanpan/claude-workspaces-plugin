@@ -245,6 +245,20 @@ describe('buildLibrary', () => {
     ]);
   });
 
+  it('dates a board doc as created when the board made it, never by its file’s birth', () => {
+    // A `git pull` that changes a file writes a new one, so the bytes' birth
+    // time moves with every edit that arrives that way. The record does not.
+    const lib = buildLibrary(
+      sources({
+        docs: [meta('d-plan', { title: 'Saltmarsh plan', createdAt: 1_000 })],
+        fileMtime: () => 9_000,
+      }),
+    );
+    expect(lib.files.map((r) => [r.name, r.at, r.created])).toEqual([
+      ['Saltmarsh plan', 9_000, 1_000],
+    ]);
+  });
+
   it("takes the project from the board's own docs, not a review's members", () => {
     const other = 'git:example.com/harborlight/saltmarsh';
     const keys: Record<string, string> = {

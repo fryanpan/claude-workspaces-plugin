@@ -138,8 +138,6 @@ export interface LibrarySources {
    * ways in one column.
    */
   fileMtime: (docId: string) => number | undefined;
-  /** When the file this doc is bound to was created on disk, if known. */
-  fileBirth?: (docId: string) => number | undefined;
   /** What `where` is built from; absent, no `where` is built. */
   placing?: Omit<PlacingContext, 'projectRepoKey' | 'projectVisible'>;
   /** The checkout a project's files are read from, or null when none is left. */
@@ -409,9 +407,12 @@ export function buildLibrary(src: LibrarySources): LibraryPayload {
       title,
       href,
       at: src.fileMtime(meta.docId),
-      // Birth of the bytes, else when the record was made: an agent's doc
-      // counts as created on the board as much as a person's.
-      created: src.fileBirth?.(meta.docId) ?? meta.createdAt,
+      // When the board made the record, never the bytes' birth time: a
+      // `git pull` that changes a file writes a new one, so its birth moved
+      // with every edit that arrived that way, and Recently Created read as
+      // Recently Modified. An agent's doc counts as created as much as a
+      // person's.
+      created: meta.createdAt,
     };
     docFiles.push(fileRow);
     const kind = meta.type === 'mockup' || meta.type === 'whiteboard' ? 'mockups' : 'documents';

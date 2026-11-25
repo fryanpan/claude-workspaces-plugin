@@ -5527,11 +5527,13 @@ html:has(.board-walk-cred-form) {
 .lf-newfolder:hover {
   text-decoration: underline;
 }
-/* Recently Viewed and Recently Created: two tabs in one row (Bryan,
-   2026-11-13), styled as the task panel's tabs (`.board-detail-tab`). Both
-   labels keep one weight and the underline is always 2px, only coloured when
-   chosen, so picking a tab moves neither tab nor anything below. The row's
-   own rule is the baseline the underline sits on. */
+/* Recently Viewed, Recently Modified and Recently Created: three tabs in one
+   row (Bryan, 2026-11-13; the third from the hub feedback doc), styled as the
+   task panel's tabs (`.board-detail-tab`). Every label keeps one weight and
+   the underline is always 2px, only coloured when chosen, so picking a tab
+   moves neither tab nor anything below. The row's own rule is the baseline
+   the underline sits on. At 430 the three labels fill the row (x=412 of 416), so
+   the row holds nothing else. */
 .lf-recent-tabs {
   align-items: stretch;
   border-bottom: 1px solid var(--border);
@@ -5544,12 +5546,21 @@ html:has(.board-walk-cred-form) {
   min-height: var(--lf-hit);
   margin-bottom: -1px;
 }
-/* Recently Viewed's "Show more" holds the right of the tab row at the width
-   of its longer label, so neither label moves it or the tabs. */
-.lf-recent-tabs .lf-viewmore {
-  justify-content: flex-end;
-  min-width: 6.5em;
-  margin-left: auto;
+/* 8px a side, not the task panel's 12: the three labels then sit on one line
+   at 430 (measured: they end at x=412, the row at 416). Where a font runs
+   wider a label wraps to two lines inside the same 44px tab, so the row
+   never scrolls sideways and nothing below it moves. Scoped under the list
+   so it outranks `.board-detail-tab`, which sits later in this sheet. */
+.lf-tablist .lf-recent-tab {
+  padding: 0 8px;
+}
+.lf-tablist .lf-recent-tab:first-child {
+  padding-left: 0;
+}
+/* Recently Viewed's "Show more", under its table as "See all files" is
+   under the other two. */
+.lf-recent-panel .lf-viewmore {
+  padding: 0;
 }
 .lf-colhead {
   justify-self: end;

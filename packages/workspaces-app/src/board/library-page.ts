@@ -5,7 +5,7 @@
  * kind of doc really lives (mock v2).
  *
  * Four states, one at a time: the front page (Starred, the Recently Viewed /
- * Recently Created tabs, the folders, then the fold), the full list with a
+ * Recently Modified / Recently Created tabs, the folders, then the fold), the full list with a
  * way back, the docs in one location with a way back, and search results
  * while the box holds a term. A row is its title and one time — the page exists so that finding a
  * doc never needs a repo path, so no row carries one.
@@ -285,7 +285,7 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
     const recent = recentTabsHtml(tab, payload, {
       viewedOpen,
       rowHtml: tree.rowHtml,
-      entryHtml: (e) => entryHtml(e, 'created'),
+      entryHtml,
     });
     const rows = [...payload.meetings, ...payload.files];
     const starred = starredSectionHtml(stars.list(), rows, tree.rowHtml, tree.folderLinkHtml);

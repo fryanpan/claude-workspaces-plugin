@@ -66,11 +66,14 @@ describe('Recently Viewed', () => {
     ]);
   });
 
-  it('"Show more" reveals the older views, and its heading row stays put', async () => {
+  it('"Show more", under the table, reveals the older views, and the tab row stays put', async () => {
     const { page, root } = driveLibrary(WS, PAYLOAD, NOW);
     await page.open();
     const head = () => root.querySelector('.lf-recent-tabs') as HTMLElement;
-    const toggle = () => head().querySelector('[data-lf-viewmore]') as HTMLButtonElement;
+    const toggle = () =>
+      root.querySelector('[data-lf-panel=viewed] > [data-lf-viewmore]') as HTMLButtonElement;
+    // The tab row holds the tabs alone: three labels fill it at 430.
+    expect(head().querySelector('[data-lf-viewmore]')).toBeNull();
     expect(toggle().textContent).toBe('Show more');
     expect(toggle().getAttribute('aria-expanded')).toBe('false');
     await click(toggle());
@@ -83,7 +86,7 @@ describe('Recently Viewed', () => {
       'Riverbend note 4',
       'Riverbend note 6',
     ]);
-    // Same row, same place in it, label swapped; focus stays on it.
+    // Label swapped; focus stays on it.
     expect(toggle().textContent).toBe('Show less');
     expect(toggle().getAttribute('aria-expanded')).toBe('true');
     expect(head().querySelector('[aria-selected=true]')?.textContent).toBe('Recently Viewed');

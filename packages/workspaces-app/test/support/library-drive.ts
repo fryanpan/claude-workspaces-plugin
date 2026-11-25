@@ -8,6 +8,7 @@
 import { libraryHref } from '../../src/board/board-url.ts';
 import type { LibraryPayload } from '../../src/board/library-model.ts';
 import { type LibraryPage, createLibraryPage } from '../../src/board/library-page.ts';
+import type { RecentTab } from '../../src/board/library-recent.ts';
 import { type FakeStorage, fakeHistory, fakeStorage } from '../boot-harness.ts';
 
 export interface DriveOptions {
@@ -18,7 +19,7 @@ export interface DriveOptions {
   viewer?: { id: string; name: string; kind: string };
   toasts?: string[];
   /** The recent-files tab this device last picked; omitted, none stored. */
-  recentTab?: 'viewed' | 'created';
+  recentTab?: RecentTab;
   /** The device's storage, to share one across two page loads. */
   storage?: FakeStorage;
 }

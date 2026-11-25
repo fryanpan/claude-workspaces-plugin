@@ -120,7 +120,7 @@ function drive() {
     now: () => NOW,
     toast: (msg, action) => toasts.push({ msg, run: action?.run }),
     // Recently Created showing, the tab these cases file docs from.
-    storage: fakeStorage({ 'cw-library-recent-tab': 'created' }),
+    storage: fakeStorage({ 'cw-library-recent-tab': 'modified' }),
   });
   return { page, root, board, toasts };
 }
@@ -148,7 +148,7 @@ const typeName = async (root: ParentNode, value: string) => {
 const recentRow = (root: ParentNode, name: string) =>
   [
     ...(
-      root.querySelector('[data-lf-panel=created] > .library-tbl') as Element
+      root.querySelector('[data-lf-panel=modified] > .library-tbl') as Element
     ).querySelectorAll<HTMLElement>('.lf-doc'),
   ].find((r) => r.querySelector('.library-name')?.textContent === name) as HTMLElement;
 

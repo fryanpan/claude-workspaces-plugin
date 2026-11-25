@@ -1,8 +1,9 @@
 /**
- * The Library's recent-files tabs, driven: Recently Viewed and Recently
- * Created in one row, the tab last picked kept per device, the row holding
- * still as the tab changes, and a doc made elsewhere reaching an open
- * Recently Created tab over the board's feed.
+ * The Library's recent-files tabs, driven: Recently Viewed, Recently Modified
+ * and Recently Created in one row, the tab last picked kept per device, the
+ * row holding still as the tab changes, Created listing board docs by when
+ * each was made, and a doc made elsewhere reaching an open Recently Created
+ * tab over the board's feed.
  *
  * All fixtures synthetic.
  */
@@ -25,6 +26,15 @@ const PAYLOAD: LibraryPayload = {
       at: NOW - HOUR,
       created: NOW - HOUR,
       href: `/workspaces/${WS}/docs/saltmarsh-plan`,
+      docId: 'saltmarsh-plan',
+    },
+    // Edited just now, made two days ago.
+    {
+      name: 'Harborlight charter',
+      at: NOW - 60_000,
+      created: NOW - 48 * HOUR,
+      href: `/workspaces/${WS}/docs/charter`,
+      docId: 'charter',
     },
   ],
 };
@@ -32,14 +42,16 @@ const PAYLOAD: LibraryPayload = {
 const drive = (opts: DriveOptions = {}) => driveLibrary(WS, PAYLOAD, NOW, opts);
 const names = (root: ParentNode) =>
   [...root.querySelectorAll('.library-name')].map((n) => n.textContent);
-const recentTable = (root: ParentNode) =>
-  root.querySelector('[data-lf-panel=created] > .library-tbl') as Element;
+const panelTable = (root: ParentNode, tab: string) =>
+  root.querySelector(`[data-lf-panel=${tab}] > .library-tbl`) as Element;
+const recentTable = (root: ParentNode) => panelTable(root, 'created');
+const ALL = ['Recently Viewed', 'Recently Modified', 'Recently Created'];
 const tabs = (root: ParentNode) =>
   [...root.querySelectorAll('.lf-recent-tabs [role=tab]')].map((t) => t.textContent);
 const chosenTab = (root: ParentNode) =>
   root.querySelector('.lf-recent-tabs [aria-selected=true]')?.textContent;
 
-describe('the Recently Viewed / Recently Created tabs', () => {
+describe('the Recently Viewed / Modified / Created tabs', () => {
   afterEach(() => {
     document.body.innerHTML = '';
   });
@@ -47,15 +59,32 @@ describe('the Recently Viewed / Recently Created tabs', () => {
   it('opens on Recently Viewed on a device that never picked, with Created one tap away', async () => {
     const { page, root } = drive();
     await page.open();
-    expect(tabs(root)).toEqual(['Recently Viewed', 'Recently Created']);
+    expect(tabs(root)).toEqual(ALL);
     expect(chosenTab(root)).toBe('Recently Viewed');
     expect(root.querySelector('[data-lf-panel=viewed]')).not.toBeNull();
     expect(root.querySelector('[data-lf-panel=created]')).toBeNull();
     await click(root.querySelector('[data-lf-tab=created]') as HTMLElement);
     expect(chosenTab(root)).toBe('Recently Created');
-    expect(names(recentTable(root))[0]).toBe('Tide gauge notes');
     expect(root.querySelector('[data-lf-panel=viewed]')).toBeNull();
     expect(document.activeElement).toBe(root.querySelector('[data-lf-tab=created]'));
+  });
+
+  it('lists recent edits under Recently Modified and board docs newest-made first under Recently Created', async () => {
+    const { page, root } = drive();
+    await page.open();
+    await click(root.querySelector('[data-lf-tab=modified]') as HTMLElement);
+    expect(chosenTab(root)).toBe('Recently Modified');
+    expect(panelTable(root, 'modified').querySelector('.lf-colhead')?.textContent).toBe('Modified');
+    expect(names(panelTable(root, 'modified'))).toEqual([
+      'Tide gauge notes',
+      'Harborlight charter',
+      'Saltmarsh plan',
+    ]);
+    await click(root.querySelector('[data-lf-tab=created]') as HTMLElement);
+    expect(recentTable(root).querySelector('.lf-colhead')?.textContent).toBe('Created');
+    // The charter's edit a minute ago does not lift it: it was made two days
+    // ago. The project file no doc holds has no record of being made.
+    expect(names(recentTable(root))).toEqual(['Saltmarsh plan', 'Harborlight charter']);
   });
 
   it('keeps the tab row where it was, same labels in the same order, when the tab changes', async () => {
@@ -66,7 +95,10 @@ describe('the Recently Viewed / Recently Created tabs', () => {
     const before = at();
     await click(root.querySelector('[data-lf-tab=created]') as HTMLElement);
     expect(at()).toBe(before);
-    expect(tabs(root)).toEqual(['Recently Viewed', 'Recently Created']);
+    expect(tabs(root)).toEqual(ALL);
+    await click(root.querySelector('[data-lf-tab=modified]') as HTMLElement);
+    expect(at()).toBe(before);
+    expect(tabs(root)).toEqual(ALL);
   });
 
   it('remembers the tab last picked on this device, and a reload opens on it', async () => {
@@ -86,11 +118,23 @@ describe('the Recently Viewed / Recently Created tabs', () => {
     const { page, root } = drive();
     await page.open();
     const tab = (t: string) => root.querySelector(`[data-lf-tab=${t}]`) as HTMLElement;
-    expect([tab('viewed').tabIndex, tab('created').tabIndex]).toEqual([0, -1]);
-    tab('viewed').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    const stops = () => ['viewed', 'modified', 'created'].map((t) => tab(t).tabIndex);
+    const press = (t: string, key: string) =>
+      tab(t).dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+    expect(stops()).toEqual([0, -1, -1]);
+    press('viewed', 'ArrowRight');
+    expect(chosenTab(root)).toBe('Recently Modified');
+    expect(document.activeElement).toBe(tab('modified'));
+    expect(stops()).toEqual([-1, 0, -1]);
+    press('modified', 'End');
     expect(chosenTab(root)).toBe('Recently Created');
-    expect(document.activeElement).toBe(tab('created'));
-    expect([tab('viewed').tabIndex, tab('created').tabIndex]).toEqual([-1, 0]);
+    press('created', 'ArrowRight');
+    expect(chosenTab(root)).toBe('Recently Created');
+    press('created', 'ArrowLeft');
+    expect(chosenTab(root)).toBe('Recently Modified');
+    press('modified', 'Home');
+    expect(chosenTab(root)).toBe('Recently Viewed');
+    expect(document.activeElement).toBe(tab('viewed'));
   });
 });
 
@@ -127,6 +171,7 @@ describe('the Recently Created tab on the board', () => {
           at: NOW + HOUR,
           created: NOW + HOUR,
           href: `/workspaces/${WS}/docs/rb`,
+          docId: 'rb',
         },
         ...PAYLOAD.files,
       ],
