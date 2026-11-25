@@ -121,17 +121,17 @@ export function judge(
 
 // --- the git half ---------------------------------------------------------
 
-function git(...a: string[]): string {
-  return execFileSync('git', ['-C', REPO_ROOT, ...a], {
+function git(root: string, ...a: string[]): string {
+  return execFileSync('git', ['-C', root, ...a], {
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
   }).trim();
 }
 
-function tryGit(...a: string[]): string | null {
+function tryGit(root: string, ...a: string[]): string | null {
   try {
     // stderr piped: a missing ref is an expected outcome here, not console noise.
-    return execFileSync('git', ['-C', REPO_ROOT, ...a], {
+    return execFileSync('git', ['-C', root, ...a], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       maxBuffer: 64 * 1024 * 1024,
@@ -145,8 +145,22 @@ function lines(out: string): string[] {
   return out.split('\n').filter(Boolean);
 }
 
-export function pathsAt(ref: string): string[] {
-  return lines(git('ls-tree', '-r', '--name-only', ref, '--', 'packages'));
+export function pathsAt(ref: string, root: string = REPO_ROOT): string[] {
+  return lines(git(root, 'ls-tree', '-r', '--name-only', ref, '--', 'packages'));
+}
+
+/**
+ * The verdict for the branch checked out in `root`, measured against `base`.
+ * Any change to the overview counts, so one new row for the new module is
+ * enough; the test drives this over a real git history to keep that true.
+ */
+export function checkRepo(root: string, base: string): Verdict {
+  const mergeBase = tryGit(root, 'merge-base', base, 'HEAD') ?? base;
+  return judge(
+    pathsAt(mergeBase, root),
+    pathsAt('HEAD', root),
+    lines(git(root, 'diff', '--name-only', `${mergeBase}...HEAD`)),
+  );
 }
 
 function main(): void {
@@ -154,7 +168,7 @@ function main(): void {
   const i = args.indexOf('--base');
   const base = i === -1 ? 'origin/main' : (args[i + 1] ?? 'origin/main');
 
-  if (tryGit('rev-parse', '--verify', `${base}^{commit}`) === null) {
+  if (tryGit(REPO_ROOT, 'rev-parse', '--verify', `${base}^{commit}`) === null) {
     // Never pass vacuously in CI: without the base ref, "no modules moved" is
     // unknowable, and a silent pass is exactly the failure this gate exists for.
     const msg =
@@ -168,12 +182,7 @@ function main(): void {
     process.exit(0);
   }
 
-  const mergeBase = tryGit('merge-base', base, 'HEAD') ?? base;
-  const verdict = judge(
-    pathsAt(mergeBase),
-    pathsAt('HEAD'),
-    lines(git('diff', '--name-only', `${mergeBase}...HEAD`)),
-  );
+  const verdict = checkRepo(REPO_ROOT, base);
 
   if (verdict.ok) {
     if (verdict.reason === 'unchanged') {
