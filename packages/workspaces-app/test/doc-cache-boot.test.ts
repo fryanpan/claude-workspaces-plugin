@@ -47,7 +47,12 @@ function fakeConnect() {
     if (acceptSync) accepts.push(acceptSync);
     const ydoc = new Y.Doc();
     // Never synced: the server is not there.
-    return { ydoc, onReset: () => {}, onReady: () => {} } as unknown as FeedbackClient;
+    return {
+      ydoc,
+      onReset: () => {},
+      onReady: () => {},
+      onStatus: () => {},
+    } as unknown as FeedbackClient;
   };
   return { calls, accepts, connect };
 }

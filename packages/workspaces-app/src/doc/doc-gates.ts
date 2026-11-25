@@ -12,10 +12,12 @@
  * surface: `canWrite` arrived on the MountContext, so nothing here waits on a
  * network answer and nothing is editable in the meantime.
  */
+import { type DocAccessTracker, roleLabel, typingAllowed } from '../doc-access.ts';
 import { initialEditMode } from '../edit-mode.ts';
 import type { EditorHandle } from '../editor.ts';
+import { setRoleReadingCrumb } from '../huddle-entry.ts';
 import type { MountScope } from '../mount-scope.ts';
-import { lockDocToReading } from '../signin/write-gate.ts';
+import { WRITE_CONTROL_ATTR, lockDocToReading } from '../signin/write-gate.ts';
 import { applyWidthPref, wireFormatBar } from './editor-toolbar.ts';
 
 /** The chrome this phase speaks for. */
@@ -29,6 +31,8 @@ export interface DocGatesOptions {
   scope: MountScope;
   els: DocGateElements;
   canWrite: boolean;
+  /** The doc socket's access level (`doc-access.ts`), when it has one. */
+  access?: DocAccessTracker | undefined;
 }
 
 export function wireDocGates(opts: DocGatesOptions): void {
@@ -66,6 +70,35 @@ export function wireDocGates(opts: DocGatesOptions): void {
   }
 
   // =========================================================================
+  // ACCESS LEVEL — what the doc's own socket says this member may do. A
+  //   `view` or `comment` member is signed in, so `canWrite` is true, and the
+  //   server drops their typing anyway (`socket-write-gate.ts`). Locked while
+  //   the socket says so, unlocked when a role change reconnects it as an
+  //   editor; the label is the save-state chip's (`doc-save-state.ts`).
+  // =========================================================================
+  if (editable && opts.access) {
+    const apply = (): void => {
+      if (scope.disposed) return;
+      const access = opts.access?.current() ?? null;
+      const typing = typingAllowed(access);
+      if (editor.editor.isEditable !== typing) editor.editor.setEditable(typing);
+      document.body.classList.toggle('view-mode', !typing);
+      if (!typing) {
+        formatBar.classList.add('is-collapsed');
+        toggleFormat.setAttribute('aria-pressed', 'false');
+      }
+      lockWriteControls(typing ? null : roleLabel(access));
+      setRoleReadingCrumb(document, !typing);
+    };
+    apply();
+    scope.onCleanup(opts.access.onChange(apply));
+    scope.onCleanup(() => {
+      lockWriteControls(null);
+      setRoleReadingCrumb(document, false);
+    });
+  }
+
+  // =========================================================================
   // HOTKEYS — ⌘M / Escape are wired by the shared chrome; only the
   // markdown-specific format-bar hotkey lives here.
   // =========================================================================
@@ -76,4 +109,26 @@ export function wireDocGates(opts: DocGatesOptions): void {
       toggleFormat.click();
     }
   });
+}
+
+/** What a write control said before a role locked it, to put back. */
+const SAID = 'data-role-locked-title';
+
+/**
+ * Disable every marked write control with `why` as its title, or put them
+ * back when `why` is null. Only the ones this function locked come back: the
+ * sign-in lock (`lockDocToReading`) is not this one's to undo.
+ */
+function lockWriteControls(why: string | null): void {
+  for (const btn of document.querySelectorAll<HTMLButtonElement>(`[${WRITE_CONTROL_ATTR}]`)) {
+    if (why !== null) {
+      if (!btn.hasAttribute(SAID)) btn.setAttribute(SAID, btn.title);
+      btn.disabled = true;
+      btn.title = why;
+    } else if (btn.hasAttribute(SAID)) {
+      btn.title = btn.getAttribute(SAID) ?? '';
+      btn.removeAttribute(SAID);
+      btn.disabled = false;
+    }
+  }
 }
