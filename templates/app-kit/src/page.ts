@@ -4,6 +4,7 @@
  * attributes on <body>.
  */
 import type { CollabRole, Principal } from '@claude-workspaces/app-kit/collab';
+import { ROLE_TEXT } from './role-text.ts';
 
 const esc = (s: string): string =>
   s.replace(
@@ -46,13 +47,6 @@ export function homePage(appName: string, who: Principal): string {
   );
 }
 
-const ROLE_TEXT: Record<CollabRole, string> = {
-  owner: 'You own this doc',
-  edit: 'You can edit',
-  comment: 'You can read',
-  view: 'You can read',
-};
-
 /** The owner's form for giving somebody a role on the doc. */
 function shareForm(docId: string): string {
   return `<form method="post" action="/docs/${esc(docId)}/roles" class="app-share" id="share">
@@ -70,7 +64,7 @@ export function docPage(appName: string, who: Principal, docId: string, role: Co
     `${header(appName, who)}
 <h2>${esc(docId)}</h2>
 <div class="app-row app-quiet">
-<span>${ROLE_TEXT[role]}</span>
+<span id="role">${ROLE_TEXT[role]}</span>
 <span id="status" role="status">Connecting…</span>
 <span id="here" class="app-here" aria-label="Also here"></span>
 </div>

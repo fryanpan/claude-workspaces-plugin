@@ -68,6 +68,7 @@ import type { SignInDoor } from './middleware/signin-door.ts';
 import { widgetDoorRoute, widgetDoorSignInBody } from './middleware/widget-door.ts';
 import { isPageDoc } from './page-thread.ts';
 import { localHostnames } from './public-host.ts';
+import type { AccessRole, RolesMode } from './share/board-access.ts';
 import { type BoardRole } from './share/board-role.ts';
 import { collabMemberKey } from './share/collab-member-key.ts';
 import { redactMetaForVisitor, relativeReviewUrl } from './share/redact-meta.ts';
@@ -251,6 +252,10 @@ export interface RequestAdmissionContext {
   redeemShareLink: (linkId: string, email: string | null) => Response;
   /** What a caller may DO on a board — `board-membership.ts`'s one reading. */
   boardRoleOf: (workspaceId: string, email: string | null, isVisitor: boolean) => BoardRole;
+  /** The four-word access level beside it (`share/board-access.ts`). */
+  boardAccessOf: (workspaceId: string, email: string | null, isVisitor: boolean) => AccessRole;
+  /** Whether a board enforces its narrow roles or only logs them. */
+  rolesModeOf: (workspaceId: string) => RolesMode;
   /** Every board on this server, for a member's list at `/`. */
   listBoards: () => readonly BoardWorkspace[];
   /** One path segment, decoded without throwing on a bad escape. */
@@ -384,6 +389,14 @@ export type Admission =
        * every site.
        */
       requireOwner: (workspaceId: string) => Response | null;
+      /**
+       * The 403 for a member whose access level is below `need` on a board
+       * that enforces its roles, or `null`. `comment` is what writing a doc's
+       * threads takes, `edit` what changing its text takes. The socket half
+       * of the same rule is `socket-write-gate.ts`; under `report-only` both
+       * halves let the write through.
+       */
+      refuseBelow: (workspaceId: string, need: 'comment' | 'edit') => Response | null;
     };
 
 export interface RequestAdmission {
@@ -415,6 +428,8 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
     shareLinkMemberOf,
     redeemShareLink,
     boardRoleOf,
+    boardAccessOf,
+    rolesModeOf,
     listBoards,
     safeDecodeSegment,
     withReviewUrl,
@@ -1118,6 +1133,19 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
             message: 'Only this board’s owner can do that.',
           });
 
+    const refuseBelow = (workspaceId: string, need: 'comment' | 'edit'): Response | null => {
+      const role = boardAccessOf(workspaceId, accessEmail, visitor !== null);
+      const short = role === 'view' || (need === 'edit' && role === 'comment');
+      if (!short || rolesModeOf(workspaceId) !== 'enforce') return null;
+      return j(403, {
+        error: role === 'view' ? 'view_only' : 'comment_only',
+        message:
+          role === 'view'
+            ? 'You can view this board. Ask its owner for more access.'
+            : 'You can comment on this board. Ask its owner for edit access.',
+      });
+    };
+
     return {
       admitted: true,
       visitor,
@@ -1133,6 +1161,7 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
       metaFor,
       roleFor,
       requireOwner,
+      refuseBelow,
     };
   };
 

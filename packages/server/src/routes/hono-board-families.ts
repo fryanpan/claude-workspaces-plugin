@@ -97,6 +97,7 @@ function boardValues(c: Context<HonoBoardAppEnv>, ctx: HonoBoardFamiliesContext)
     metaFor: gate.metaFor,
     roleFor: gate.roleFor,
     requireOwner: gate.requireOwner,
+    refuseBelow: gate.refuseBelow,
     accessEmail: gate.accessEmail,
     refuseCategoryAuthor: attribution.refuseCategoryAuthor,
     withTaskChips: attribution.withTaskChips,
@@ -136,6 +137,7 @@ const scoped = (v: BoardValues) => ({
   authorFor: v.authorFor,
   roleFor: v.roleFor,
   requireOwner: v.requireOwner,
+  refuseBelow: v.refuseBelow,
 });
 
 /**

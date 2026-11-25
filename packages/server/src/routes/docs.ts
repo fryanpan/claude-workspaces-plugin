@@ -96,6 +96,7 @@ import type { ThreadPromoteAnswer, ThreadPromoteBody } from './doc-threads-contr
 import { handleDocThreadRoutes } from './doc-threads-routes.ts';
 import { handleDocTitleRoute } from './doc-title.ts';
 import { handleDocVoiceFeedbackRoute } from './doc-voice-feedback.ts';
+import { docWriteNeed } from './doc-write-access.ts';
 import type {
   DocResourceRouteRequest,
   DocRouteRequest,
@@ -573,6 +574,9 @@ export async function handleDocPromoteRoute(
   if (promoteMatch && req.method === 'POST') {
     const docId = canonicalDocId(decodeURIComponent(promoteMatch[1] ?? ''));
     const threadId = decodeURIComponent(promoteMatch[2] ?? '');
+    // Matched before the doc resource block, so it asks for itself.
+    const short = rq.refuseBelow(scope?.workspaceId ?? '', 'comment');
+    if (short) return short;
     const body = sent<ThreadPromoteBody>(await safeJson(req));
     /**
      * THE PATH NAMES THE DESTINATION, and this is the clearest thing the
@@ -744,6 +748,16 @@ export async function handleDocResourceRoutes(
   // rather than each one having to remember.
   const docId = doc.docId;
   const docRq: DocResourceRouteRequest = { ...rq, docId, doc, rest };
+  // A member's access level, before any subroute writes the threads or the
+  // text (`doc-write-access.ts`).
+  const need = docWriteNeed(rq.req.method, rest);
+  if (need) {
+    const short = rq.refuseBelow(
+      scope?.workspaceId ?? ctx.resolveWorkspaceForDoc(docId) ?? '',
+      need,
+    );
+    if (short) return short;
+  }
   return (
     (await handleDocResourceCore(ctx, docRq)) ??
     (await handleDocAssetsRoute(ctx, docRq)) ??

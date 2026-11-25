@@ -7,7 +7,8 @@
  * again on every update and view, so somebody whose role is gone is shown to
  * nobody and sees nobody. This file is only the socket's half: what a page
  * sends (`{"spot":{}}`, "I am on this doc") and what it is sent back
- * (`{"here":[{"id","name"}]}`, everyone else on it), as JSON text frames on
+ * (`{"here":[{"id","name"}],"role":"edit"}`, everyone else on it and the
+ * reader's own role), as JSON text frames on
  * `/docs/<id>/presence`.
  *
  * Each doc is a room and its page is the only page with presence, so a page
@@ -55,8 +56,10 @@ export function createDocPresence(role: RoleFn): DocPresence {
   const push = (ws: PresenceSocket): void => {
     if (!ws.conn) return;
     const here = ws.conn.view().here.map((p) => ({ id: p.id, name: p.name }));
+    // The reader's own role rides along, so a role change reaches their page
+    // on the push `recheck` already makes, without a reload.
     try {
-      ws.send(JSON.stringify({ here }));
+      ws.send(JSON.stringify({ here, role: role(ws.who, ws.docId) }));
     } catch {
       // A socket that died mid-send: its close is on its way.
     }

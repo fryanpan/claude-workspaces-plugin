@@ -30,9 +30,24 @@ export function applyReadingCrumb(doc: Document): void {
   applyHuddleCrumb(doc, lastHuddle, lastKind);
 }
 
+/**
+ * The open doc's own reading lock: its socket said this member may view or
+ * comment but not edit (`doc-access.ts`). Not part of the latch, because it
+ * belongs to one doc on one board, and the owner can raise it.
+ */
+let lockedByRole = false;
+
+/** Say whether the open doc is locked by the member's role, and repaint. */
+export function setRoleReadingCrumb(doc: Document, locked: boolean): void {
+  if (lockedByRole === locked) return;
+  lockedByRole = locked;
+  applyHuddleCrumb(doc, lastHuddle, lastKind);
+}
+
 /** Test seam — the latch is module state and outlives a single test. */
 export function resetReadingCrumbForTest(): void {
   readingOnly = false;
+  lockedByRole = false;
   lastHuddle = false;
   lastKind = undefined;
 }
@@ -55,6 +70,10 @@ export function applyHuddleCrumb(doc: Document, huddle: boolean, kind?: HuddleKi
   lastKind = kind;
   const label = doc.querySelector('.doc-crumb .doc-label');
   if (!label) return;
-  label.textContent = huddle ? docKindLabel(kind) : readingOnly ? 'Reading:' : 'Editing:';
+  label.textContent = huddle
+    ? docKindLabel(kind)
+    : readingOnly || lockedByRole
+      ? 'Reading:'
+      : 'Editing:';
   label.classList.toggle('doc-label-huddle', huddle);
 }

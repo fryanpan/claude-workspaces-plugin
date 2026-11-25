@@ -16,6 +16,7 @@
 import type { FeedbackClient } from '@claude-workspaces/core';
 import type * as Y from 'yjs';
 import { saveStateView, settlePending, watchConnection } from '../connection-state.ts';
+import { type DocAccessTracker, roleLabel } from '../doc-access.ts';
 import type { MountScope } from '../mount-scope.ts';
 import { el } from './chrome-dom.ts';
 
@@ -26,6 +27,9 @@ export interface DocSaveStateOptions {
    *  rather than claiming a save that cannot happen. */
   canWrite: boolean;
   scope: MountScope;
+  /** The doc socket's access level: a locked member's chip names the level
+   *  rather than claiming a save the server will not make. */
+  access?: DocAccessTracker | undefined;
 }
 
 export function mountDocSaveState(opts: DocSaveStateOptions): void {
@@ -45,12 +49,23 @@ export function mountDocSaveState(opts: DocSaveStateOptions): void {
   let wsOnline = false;
   let reconnecting = false;
   function renderSaveState(): void {
-    saveStateEl.classList.remove('save-state--saved', 'save-state--dirty', 'save-state--offline');
+    saveStateEl.classList.remove(
+      'save-state--saved',
+      'save-state--dirty',
+      'save-state--offline',
+      'save-state--role',
+    );
     // Nothing to report about saving on a surface that cannot save. "All
     // changes saved" beside a locked editor is a true sentence describing a
     // thing that is not happening, which is worse than silence.
     if (!canWrite) {
       saveStateEl.textContent = '';
+      return;
+    }
+    const locked = roleLabel(opts.access?.current() ?? null);
+    if (locked !== null) {
+      saveStateEl.textContent = locked;
+      saveStateEl.classList.add('save-state--role');
       return;
     }
     switch (saveStateView({ reconnecting, pendingEdits: pendingLocalEdits })) {
@@ -112,6 +127,13 @@ export function mountDocSaveState(opts: DocSaveStateOptions): void {
       renderSaveState();
     },
   });
+  if (opts.access) {
+    scope.onCleanup(
+      opts.access.onChange(() => {
+        if (!scope.disposed) renderSaveState();
+      }),
+    );
+  }
   renderSaveState();
   // On navigation, cancel the pending save-state debounce and blank the shared
   // #save-state indicator — otherwise a stale timer rewrites it with THIS
@@ -119,7 +141,12 @@ export function mountDocSaveState(opts: DocSaveStateOptions): void {
   // (findings #3, #9), and code/diff surfaces have no save state to show.
   scope.onCleanup(() => {
     if (saveTimer) clearTimeout(saveTimer);
-    saveStateEl.classList.remove('save-state--saved', 'save-state--dirty', 'save-state--offline');
+    saveStateEl.classList.remove(
+      'save-state--saved',
+      'save-state--dirty',
+      'save-state--offline',
+      'save-state--role',
+    );
     saveStateEl.textContent = '';
   });
 }

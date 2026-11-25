@@ -2308,6 +2308,8 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     shareLinkMemberOf,
     redeemShareLink,
     boardRoleOf,
+    boardAccessOf,
+    rolesModeOf: (workspaceId) => shareLinks.rolesModeOf(workspaceId),
     listBoards: () => taskStore.listWorkspaces(),
     safeDecodeSegment,
     withReviewUrl,
