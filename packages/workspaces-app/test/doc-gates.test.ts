@@ -2,9 +2,11 @@ import { prose } from '@claude-workspaces/core';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Awareness } from 'y-protocols/awareness';
 import * as Y from 'yjs';
+import type { DocAccess, DocAccessTracker } from '../src/doc-access.ts';
 import { wireDocGates } from '../src/doc/doc-gates.ts';
 import { type EditorHandle, createEditor } from '../src/editor.ts';
 import { MountScope } from '../src/mount-scope.ts';
+import { isSuggesting, setSuggesting } from '../src/suggest-input.ts';
 
 /**
  * The last phase of a document's boot (doc/doc-gates.ts): what this browser
@@ -37,7 +39,7 @@ beforeEach(() => {
 
 const byId = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 
-function wire(canWrite: boolean) {
+function wire(canWrite: boolean, access?: DocAccessTracker) {
   const ydoc = new Y.Doc();
   prose.getProseFragment(ydoc).push(prose.parseMarkdownBlocks('A paragraph.\n'));
   const editor: EditorHandle = createEditor({
@@ -54,6 +56,7 @@ function wire(canWrite: boolean) {
       toggleFormat: byId<HTMLButtonElement>('toggle-format'),
     },
     canWrite,
+    access,
   });
   open.push(() => {
     scope.dispose();
@@ -137,5 +140,58 @@ describe('a browser the server will not accept writes from', () => {
     wire(false);
     expect(byId('format-bar').classList.contains('is-collapsed')).toBe(true);
     expect(byId('toggle-format').getAttribute('aria-pressed')).toBe('false');
+  });
+});
+
+/** An access tracker the test tells by hand. */
+function fakeAccess() {
+  let current: DocAccess | null = null;
+  const cbs = new Set<(a: DocAccess) => void>();
+  const tracker: DocAccessTracker = {
+    current: () => current,
+    onChange: (cb) => {
+      cbs.add(cb);
+      return () => cbs.delete(cb);
+    },
+  };
+  const tell = (role: DocAccess['role']) => {
+    current = { role, mode: 'enforce' };
+    for (const cb of [...cbs]) cb(current);
+  };
+  return { tracker, tell };
+}
+
+describe('a member whose access level forbids typing', () => {
+  it('locks controls mounted after the lock, and gives back only what it took', async () => {
+    const off = document.createElement('button');
+    off.setAttribute('data-write-control', '');
+    off.disabled = true;
+    document.body.append(off);
+    const a = fakeAccess();
+    wire(true, a.tracker);
+    a.tell('view');
+    const late = document.createElement('button');
+    late.setAttribute('data-write-control', '');
+    document.body.append(late);
+    // The observer runs as a microtask after the mutation.
+    await Promise.resolve();
+    expect(late.disabled).toBe(true);
+    expect(late.title).toBe('View only');
+
+    a.tell('edit');
+    expect(late.disabled).toBe(false);
+    expect(byId<HTMLButtonElement>('a-write-control').disabled).toBe(false);
+    // Disabled by somebody else before the lock: still disabled after it.
+    expect(off.disabled).toBe(true);
+  });
+
+  it('leaves Suggesting when the level locks the editor', () => {
+    const a = fakeAccess();
+    const { editor } = wire(true, a.tracker);
+    setSuggesting(editor.editor.view, { on: true });
+    expect(isSuggesting(editor.editor.view.state)).toBe(true);
+    a.tell('comment');
+    expect(isSuggesting(editor.editor.view.state)).toBe(false);
+    expect(editor.editor.isEditable).toBe(false);
   });
 });

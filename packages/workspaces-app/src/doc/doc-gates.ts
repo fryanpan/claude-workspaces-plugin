@@ -18,6 +18,7 @@ import type { EditorHandle } from '../editor.ts';
 import { setRoleReadingCrumb } from '../huddle-entry.ts';
 import type { MountScope } from '../mount-scope.ts';
 import { WRITE_CONTROL_ATTR, lockDocToReading } from '../signin/write-gate.ts';
+import { isSuggesting, setSuggesting } from '../suggest-input.ts';
 import { applyWidthPref, wireFormatBar } from './editor-toolbar.ts';
 
 /** The chrome this phase speaks for. */
@@ -86,6 +87,9 @@ export function wireDocGates(opts: DocGatesOptions): void {
       if (!typing) {
         formatBar.classList.add('is-collapsed');
         toggleFormat.setAttribute('aria-pressed', 'false');
+        // Proposals ride the same socket the server is dropping.
+        const view = editor.editor.view;
+        if (isSuggesting(view.state)) setSuggesting(view, { on: false });
       }
       lockWriteControls(typing ? null : roleLabel(access));
       setRoleReadingCrumb(document, !typing);
@@ -113,22 +117,42 @@ export function wireDocGates(opts: DocGatesOptions): void {
 
 /** What a write control said before a role locked it, to put back. */
 const SAID = 'data-role-locked-title';
+/** Set on a control that was already disabled when the role locked it. */
+const WAS_OFF = 'data-role-locked-off';
+
+/** Watches for write controls mounted while a role holds them locked. */
+let lateControls: MutationObserver | null = null;
 
 /**
  * Disable every marked write control with `why` as its title, or put them
- * back when `why` is null. Only the ones this function locked come back: the
- * sign-in lock (`lockDocToReading`) is not this one's to undo.
+ * back when `why` is null. Only what this function changed comes back: a
+ * control another path had disabled stays disabled, and the sign-in lock
+ * (`lockDocToReading`) is not this one's to undo. While locked, a control
+ * mounted later is locked as it appears.
  */
 function lockWriteControls(why: string | null): void {
+  lateControls?.disconnect();
+  lateControls = null;
   for (const btn of document.querySelectorAll<HTMLButtonElement>(`[${WRITE_CONTROL_ATTR}]`)) {
     if (why !== null) {
-      if (!btn.hasAttribute(SAID)) btn.setAttribute(SAID, btn.title);
+      if (!btn.hasAttribute(SAID)) {
+        btn.setAttribute(SAID, btn.title);
+        if (btn.disabled) btn.setAttribute(WAS_OFF, '');
+      }
       btn.disabled = true;
       btn.title = why;
     } else if (btn.hasAttribute(SAID)) {
       btn.title = btn.getAttribute(SAID) ?? '';
+      btn.disabled = btn.hasAttribute(WAS_OFF);
       btn.removeAttribute(SAID);
-      btn.disabled = false;
+      btn.removeAttribute(WAS_OFF);
     }
   }
+  if (why === null || typeof MutationObserver === 'undefined') return;
+  const observer = new MutationObserver(() => {
+    const unlocked = document.querySelector(`[${WRITE_CONTROL_ATTR}]:not([${SAID}])`);
+    if (unlocked && lateControls === observer) lockWriteControls(why);
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+  lateControls = observer;
 }

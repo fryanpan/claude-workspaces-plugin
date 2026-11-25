@@ -10,7 +10,7 @@
  */
 import type { AcceptSync, FeedbackClient } from '@claude-workspaces/core';
 import * as decoding from 'lib0/decoding';
-import { trackDocAccess } from './doc-access.ts';
+import { trackDocAccess, typingAllowed } from './doc-access.ts';
 import {
   type CachedDoc,
   type DocCacheStore,
@@ -119,10 +119,23 @@ export function cachedDocs(o: CachedDocsOptions): CachedDocs {
   /** Docs whose copy the server's history refused: not seeded again this page,
    *  even before the store's delete lands. */
   const refused = new Set<string>();
-  /** Docs remounted this page because they held edits the server refused
-   *  (`doc-access.ts`). Once each: a second would mean something on the page
-   *  writes the doc by itself, and remounting again would never end. */
+  /** Docs remounted because they held edits the server refused
+   *  (`doc-access.ts`), and not since told they may type. Once each until
+   *  then: a second refusal with no raise between would mean something on the
+   *  page writes the doc by itself, and remounting again would never end. A
+   *  raise clears the doc, so a later narrowing drops its words too. */
   const remounted = new Set<string>();
+  const track = (client: FeedbackClient, docId: string): void => {
+    const tracker = trackDocAccess(client, () => {
+      // A refusal found on a raise cannot repeat (the next mount starts
+      // unlocked), so only a narrowing counts against the guard.
+      if (typingAllowed(tracker.current())) remounted.delete(docId);
+      dropRefused(docId);
+    });
+    tracker.onChange((access) => {
+      if (typingAllowed(access)) remounted.delete(docId);
+    });
+  };
   const dropRefused = (docId: string): void => {
     if (remounted.has(docId)) return;
     remounted.add(docId);
@@ -159,7 +172,7 @@ export function cachedDocs(o: CachedDocsOptions): CachedDocs {
       pending.delete(docId);
       if (!store || !found || docType !== 'markdown' || !found.meta) {
         const client = o.connect(url);
-        trackDocAccess(client, () => dropRefused(docId));
+        track(client, docId);
         return client;
       }
       let persistence: DocPersistence | null = null;
@@ -171,7 +184,7 @@ export function cachedDocs(o: CachedDocsOptions): CachedDocs {
         return false;
       });
       if (found.copy) seedFromCopy(client.ydoc, found.copy);
-      trackDocAccess(client, () => dropRefused(docId));
+      track(client, docId);
       persistence = persistDoc({
         ydoc: client.ydoc,
         docId,

@@ -17,6 +17,9 @@ const STATUS_TEXT = {
   closed: 'Closed. Reload to open it again.',
 };
 
+/** What the label says once the reader's role is gone. */
+const NO_ROLE_TEXT = 'You no longer have access';
+
 function openDocForm(): void {
   const form = document.getElementById('open-doc') as HTMLFormElement | null;
   form?.addEventListener('submit', (ev) => {
@@ -51,7 +54,7 @@ function openDoc(docId: string, firstRole: string): void {
   const label = document.getElementById('role') as HTMLElement;
   const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
   const base = `${scheme}://${location.host}/docs/${encodeURIComponent(docId)}`;
-  let role = firstRole;
+  let role: string | null = firstRole;
   let sync: DocSync | null = null;
   let unbind: (() => void) | null = null;
 
@@ -81,20 +84,37 @@ function openDoc(docId: string, firstRole: string): void {
     });
   };
 
+  /** Close the doc socket and let go of the textarea, keeping its text. */
+  const shut = (): void => {
+    unbind?.();
+    unbind = null;
+    const old = sync;
+    sync = null;
+    old?.close();
+    status.textContent = STATUS_TEXT.closed;
+  };
+
   // A reader's edits would be dropped by the server; say so by not taking any.
-  const apply = (next: string): void => {
-    const narrowed = mayType(role) && !mayType(next);
+  // Null is a role that is gone: nothing more is read or sent.
+  const apply = (next: string | null): void => {
+    const was = role;
     role = next;
+    box.readOnly = next === null || !mayType(next);
+    if (next === null) {
+      label.textContent = NO_ROLE_TEXT;
+      shut();
+      return;
+    }
     label.textContent = ROLE_TEXT[next as CollabRole] ?? ROLE_TEXT.view;
-    box.readOnly = !mayType(next);
-    if (narrowed) open();
+    if (was === null || (mayType(was) && !mayType(next))) open();
   };
 
   const presence = showPresence(base);
   presence.onRole((next) => {
     if (next !== role) apply(next);
   });
-  apply(role);
+  label.textContent = ROLE_TEXT[firstRole as CollabRole] ?? ROLE_TEXT.view;
+  box.readOnly = !mayType(firstRole);
   open();
 }
 

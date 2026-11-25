@@ -57,6 +57,47 @@ function fakeConnect() {
   return { calls, accepts, connect };
 }
 
+/** A client whose socket the test opens, feeds and closes by hand. */
+function liveConnect() {
+  const clients: Array<{ ydoc: Y.Doc; open(): void; close(): void; receive(f: Uint8Array): void }> =
+    [];
+  const connect = () => {
+    const ydoc = new Y.Doc();
+    let ws = new EventTarget();
+    const statusCbs: Array<(s: string) => void> = [];
+    clients.push({
+      ydoc,
+      open() {
+        ws = new EventTarget();
+        for (const cb of statusCbs) cb('open');
+      },
+      close() {
+        for (const cb of statusCbs) cb('closed');
+      },
+      receive(frame) {
+        ws.dispatchEvent(new MessageEvent('message', { data: frame.slice().buffer }));
+      },
+    });
+    return {
+      ydoc,
+      get ws() {
+        return ws;
+      },
+      onReset: () => {},
+      onReady: () => {},
+      onStatus: (cb: (s: string) => void) => void statusCbs.push(cb),
+    } as unknown as FeedbackClient;
+  };
+  return { clients, connect };
+}
+
+const accessFrame = (role: string): Uint8Array => {
+  const enc = encoding.createEncoder();
+  encoding.writeVarUint(enc, 4);
+  encoding.writeVarString(enc, JSON.stringify({ role, mode: 'enforce' }));
+  return encoding.toUint8Array(enc);
+};
+
 describe('cachedDocs', () => {
   it('with a copy: mounts from it without waiting on the network meta', async () => {
     const { connect } = fakeConnect();
@@ -130,6 +171,50 @@ describe('cachedDocs', () => {
     await docs.fetchMeta('d2');
     docs.connect('d2', 'code', 'ws://x/d2');
     expect(calls.map((c) => c.hasAccept)).toEqual([true, false]);
+  });
+
+  it('drops refused words on every narrowing a raise came between, and stops a loop with none', async () => {
+    const { clients, connect } = liveConnect();
+    let remounts = 0;
+    const docs = cachedDocs({
+      store: storeWith({}),
+      who: Promise.resolve('anon'),
+      readMeta: async () => null,
+      fallbackMeta: () => FALLBACK,
+      connect,
+      onCopyRefused: () => {
+        remounts++;
+      },
+    });
+    const mount = async () => {
+      await docs.fetchMeta('d1');
+      docs.connect('d1', 'markdown', 'ws://x/d1');
+      const c = clients.at(-1);
+      if (!c) throw new Error('no client');
+      return c;
+    };
+    const typed = (c: { ydoc: Y.Doc }, text: string) =>
+      c.ydoc.transact(() => c.ydoc.getText('t').insert(0, text));
+    /** Told it may edit, then the role is cut while words are typed. */
+    const cutWhileTyping = (c: Awaited<ReturnType<typeof mount>>, word: string) => {
+      c.open();
+      c.receive(accessFrame('edit'));
+      c.close();
+      typed(c, word);
+      c.open();
+      c.receive(accessFrame('comment'));
+    };
+
+    cutWhileTyping(await mount(), 'Harborlight');
+    expect(remounts).toBe(1);
+    cutWhileTyping(await mount(), 'Riverbend');
+    expect(remounts).toBe(2);
+    // No raise since: a mount that writes by itself is not remounted again.
+    const third = await mount();
+    typed(third, 'Saltmarsh');
+    third.open();
+    third.receive(accessFrame('comment'));
+    expect(remounts).toBe(2);
   });
 
   it("a server that lost the copy's history: refused unanswered, remounted, and not seeded again", async () => {

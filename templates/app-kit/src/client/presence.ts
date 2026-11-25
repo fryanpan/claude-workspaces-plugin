@@ -16,8 +16,9 @@ export interface PresenceHandle {
   onChange(fn: (here: PresencePerson[]) => void): void;
   /** The reader's role on this doc, as the server last said, or null. */
   role(): string | null;
-  /** Called each time the server says the role, changed or not. */
-  onRole(fn: (role: string) => void): void;
+  /** Called each time the server says the role, changed or not. Null when
+   *  the server refused the socket (1008): the reader has no role left. */
+  onRole(fn: (role: string | null) => void): void;
   close(): void;
 }
 
@@ -35,7 +36,7 @@ const isPerson = (v: unknown): v is PresencePerson =>
 export function connectPresence(url: string, opts: PresenceOptions = {}): PresenceHandle {
   let here: PresencePerson[] = [];
   const listeners: Array<(here: PresencePerson[]) => void> = [];
-  const roleListeners: Array<(role: string) => void> = [];
+  const roleListeners: Array<(role: string | null) => void> = [];
   let role: string | null = null;
   let ws: WebSocket | null = null;
   let closed = false;
@@ -71,9 +72,15 @@ export function connectPresence(url: string, opts: PresenceOptions = {}): Presen
         // Not ours: ignore it.
       }
     });
-    socket.addEventListener('close', () => {
+    socket.addEventListener('close', (ev) => {
       if (ws === socket) ws = null;
       if (closed) return;
+      // The server closes a reader whose role is gone with 1008, and refuses
+      // their reconnect the same way.
+      if (ev.code === 1008 && role !== null) {
+        role = null;
+        for (const fn of roleListeners) fn(null);
+      }
       set([]);
       timer = setTimeout(open, retry);
       retry = Math.min(retry * 2, opts.maxRetryMs ?? 10_000);
