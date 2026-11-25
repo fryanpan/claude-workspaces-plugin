@@ -753,8 +753,9 @@ The script does these steps in order:
    runs `relay-bin.ts` from prod's checkout with prod's bun, with
    `CW_RELAY_CONFIG` and `CW_RELAY_STATE_DIR` (`relay/state`) set, and
    writes its log to `relay/relay.log`. If the plist changed, the script
-   loads it again. If it did not, the script restarts the relay with
-   `kickstart -k`.
+   loads it again. If only the config changed, the script restarts the relay
+   with `kickstart -k`. If neither changed and the relay is loaded, the
+   script leaves it running.
 4. **It sets the lead's two settings.** It sets `CW_LEAD_INBOX_DOC` and
    `CW_RELAY_AGENT_ID` with `fly secrets import`, values on stdin, on each
    project app whose lead is a seat. **This restarts that machine.** So the
@@ -767,7 +768,7 @@ The script does these steps in order:
    fails, the script exits 1 and revokes nothing.
 
 Run the script again whenever `seats.json` changes. A second run with nothing
-changed mints nothing, files nothing and sets no secret. It does restart the
+changed mints nothing, files nothing, sets no secret and does not restart the
 relay.
 
 The relay runs as the Mac's own user, so any process of that user can read

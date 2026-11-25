@@ -18,6 +18,7 @@ import { createHash } from 'node:crypto';
 import {
   appendFileSync,
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -35,6 +36,7 @@ import { agentIdForName } from '../../core/src/identity.ts';
 import { loadRelayConfig } from '../src/org-relay/relay-config.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 
+const REPO_ROOT = join(import.meta.dir, '..', '..', '..');
 const RELAY = 'agent-relay';
 const TEAM_LEAD = 'agent-team-lead';
 const LEAD = agentIdForName('riverbend-lead');
@@ -125,6 +127,24 @@ describe('relay:install', () => {
     for (const d of dirs) rmSync(d, { recursive: true, force: true });
   });
 
+  /** The machine's `env -i`, `setpriv` and `curl`: the first two drop their
+   *  options and run the rest, logging who they would run it as; curl is the
+   *  real one, sent to the test machine instead of port 8787. */
+  const stubs = tmp('relay-install-stubs-');
+  const stubLog = join(stubs, 'log');
+  const stub = (name: string, body: string) => {
+    writeFileSync(join(stubs, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  };
+  stub(
+    'env',
+    'while [ $# -gt 0 ]; do case "$1" in -i|*=*) shift;; *) break;; esac; done\nexec "$@"',
+  );
+  stub(
+    'setpriv',
+    'echo "setpriv $1" >> "$STUB_LOG"\nwhile [ $# -gt 0 ]; do [ "$1" = "--" ] && { shift; break; }; shift; done\nexec "$@"',
+  );
+  stub('curl', 'exec /usr/bin/curl --connect-to "127.0.0.1:8787:127.0.0.1:$TEST_PORT" "$@"');
+
   /** The homes whose relay agent the fake launchd holds, across runs. */
   const loaded = new Set<string>();
   /** One install's IO, with every call and line it made. */
@@ -151,17 +171,25 @@ describe('relay:install', () => {
       fly: async (args, input) => {
         fly.push({ args, ...(input !== undefined ? { input } : {}) });
         if (args[0] === 'secrets') return { status: 0, stdout: '', stderr: '' };
+        // The command a machine would run, run here by a real sh: only env,
+        // setpriv and curl are stubs (`stubs`), so every quoting layer
+        // `machineShell` and `asCw` add is parsed for real.
         const command = args[args.indexOf('--command') + 1] ?? '';
-        const method = /-X (GET|POST)/.exec(command)?.[1] ?? 'GET';
-        const path = /http:\/\/127\.0\.0\.1:8787([A-Za-z0-9_:./?=&-]*)/.exec(command)?.[1] ?? '/';
-        if (path.endsWith('/revoke')) events.push('revoke');
-        const b64 = /printf %s ([A-Za-z0-9+/=]+)/.exec(command)?.[1];
-        const res = await fetch(`${base(machine)}${path}`, {
-          method,
-          headers: { 'content-type': 'application/json' },
-          ...(b64 ? { body: Buffer.from(b64, 'base64').toString('utf8') } : {}),
+        if (command.includes('/revoke')) events.push('revoke');
+        const p = Bun.spawn(['/bin/sh', '-c', command], {
+          env: {
+            PATH: `${stubs}:/usr/bin:/bin`,
+            TEST_PORT: String(machine.port),
+            STUB_LOG: stubLog,
+          },
+          stdout: 'pipe',
+          stderr: 'pipe',
         });
-        return { status: 0, stdout: `${await res.text()}\n${res.status}\n`, stderr: '' };
+        const [stdout, stderr] = await Promise.all([
+          new Response(p.stdout).text(),
+          new Response(p.stderr).text(),
+        ]);
+        return { status: await p.exited, stdout, stderr };
       },
       launchctl: (args) => {
         launchctl.push(args);
@@ -248,6 +276,15 @@ describe('relay:install', () => {
     const plist = readFileSync(h.paths.plist, 'utf8');
     expect(plist).toContain(`<string>${h.paths.config}</string>`);
     expect(plist).toContain('CW_RELAY_STATE_DIR');
+    // The program the agent runs is relay-bin.ts in the checkout it names.
+    const program = /<string>([^<]*relay-bin\.ts)<\/string>/.exec(plist)?.[1] ?? '';
+    expect(program.startsWith(`${h.paths.repo}/`)).toBe(true);
+    expect(existsSync(join(REPO_ROOT, program.slice(h.paths.repo.length)))).toBe(true);
+    expect(plist).toContain(`<string>${h.paths.bun}</string>`);
+    // Every machine call ran as cw.
+    expect(new Set(readFileSync(stubLog, 'utf8').trim().split('\n'))).toEqual(
+      new Set(['setpriv --reuid=cw']),
+    );
     expect(h.launchctl.map((a) => a[0])).toEqual(['print', 'bootstrap']);
     const secrets = h.fly.filter((c) => c.args[0] === 'secrets');
     expect(secrets.map((c) => c.args)).toEqual([['secrets', 'import', '--app', 'cw-riverbend']]);
@@ -272,7 +309,8 @@ describe('relay:install', () => {
     expect(readFileSync(relayPaths(home).config, 'utf8')).toBe(config);
     expect(await titles(machine, machineBoard)).toHaveLength(2);
     expect(h.fly.filter((c) => c.args[0] === 'secrets')).toEqual([]);
-    expect(h.events).toEqual(['kickstart']);
+    expect(h.events).toEqual([]);
+    expect(h.out.join('\n')).toContain('logged "running: 2 seats"');
     expect(h.out.join('\n')).toContain('already set');
     expect(h.out.join('\n')).toContain("keeps the relay's token on riverbend");
   });
@@ -308,7 +346,24 @@ describe('relay:install', () => {
     expect(h.out.join('\n')).toContain('team-lead: mac answered');
   });
 
-  it('--remint replaces both tokens and revokes the old records after the restart', async () => {
+  it('keeps asking a server that is restarting until it answers', async () => {
+    const h = harness(home);
+    const real = h.io.fetch;
+    let refused = 0;
+    h.io.fetch = (url, init) => {
+      if (url.startsWith(`https://${HOST}`) && refused < 3) {
+        refused++;
+        return Promise.resolve(new Response('restarting', { status: 502 }));
+      }
+      return real(url, init);
+    };
+    h.io.sleep = async () => {};
+    expect(await runInstall({ dryRun: false, remint: false, boards: new Map() }, h.io)).toBe(0);
+    expect(refused).toBe(3);
+    expect(h.out.join('\n')).toContain('riverbend-lead: riverbend answered');
+  });
+
+  it('--remint replaces both tokens and revokes the old records once the check passes', async () => {
     const h = harness(home);
     const old = first.tokens.map((t) => t.split('.')[1]);
     expect(await runInstall({ dryRun: false, remint: true, boards: new Map() }, h.io)).toBe(0);

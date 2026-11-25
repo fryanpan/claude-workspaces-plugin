@@ -321,7 +321,12 @@ export async function runInstall(opts: InstallOptions, io: InstallIo): Promise<n
   if (plistChanged) writeFileSync(paths.plist, plistText, { mode: 0o644 });
   const domain = `gui/${io.uid}`;
   const loaded = io.launchctl(['print', `${domain}/${RELAY_LABEL}`]).status === 0;
-  if (plistChanged || !loaded) {
+  // Nothing the relay reads changed and it is running: leave it be, and
+  // judge it by the last start it logged.
+  const restarted = configChanged || plistChanged || !loaded;
+  if (!restarted) {
+    say(`${RELAY_LABEL} is loaded and nothing it reads changed; not restarted`);
+  } else if (plistChanged || !loaded) {
     if (loaded) io.launchctl(['bootout', `${domain}/${RELAY_LABEL}`]);
     const r = io.launchctl(['bootstrap', domain, paths.plist]);
     if (r.status !== 0) throw new Error(`launchctl bootstrap failed: ${r.stderr.trim()}`);
@@ -349,9 +354,11 @@ export async function runInstall(opts: InstallOptions, io: InstallIo): Promise<n
   // 5. The check.
   const want = `running: ${seats.length} seats`;
   const deadline = io.now() + (io.startWaitMs ?? 30_000);
+  const lastStart = (log: string) => log.match(/running: \d+ seats/g)?.pop();
   let started = false;
   while (!started && io.now() < deadline) {
-    started = readOr(paths.log, '').slice(logFrom).includes(want);
+    const log = readOr(paths.log, '');
+    started = restarted ? log.slice(logFrom).includes(want) : lastStart(log) === want;
     if (!started) await io.sleep(250);
   }
   say(
