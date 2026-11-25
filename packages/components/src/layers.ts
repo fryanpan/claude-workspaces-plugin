@@ -18,9 +18,13 @@
  * leaves a `url` layer waiting; `readLayerData` judges the data once it is
  * here, so a file that fails names its own layer and the rest still draw.
  *
- * Nothing here touches Leaflet or the DOM. A popup is a template whose
- * `{key}` names a feature property, filled as text (`popupText`).
+ * Nothing here touches Leaflet or the DOM. A popup (text or a card,
+ * `core/map-card.ts`) and a tooltip are templates whose `{key}` names a
+ * feature property, filled as text (`popupText`).
  */
+import { type MapPopup, readPopup } from '@claude-workspaces/core/map-card';
+
+export { popupText } from '@claude-workspaces/core/map-card';
 
 export type LayerType = 'line' | 'polygon' | 'circle' | 'heatmap';
 
@@ -52,6 +56,15 @@ export const HEAT_COLORS: readonly string[] = Object.freeze([
 
 const DEFAULT_COLOR = '#4269d0';
 
+/** What a line, polygon or circle layer does under a reader's pointer. */
+interface Tappable {
+  popup?: MapPopup;
+  /** Shown on hover. */
+  tooltip?: string;
+  /** Takes taps, for the map's click event, with no popup or tooltip. */
+  clickable?: boolean;
+}
+
 /** What a layer looks like once read; its features arrive with `data`. */
 interface LayerBase {
   /** The layer's id: the one given, else `layer-<index>`. */
@@ -65,27 +78,25 @@ interface LayerBase {
   source: { data: unknown } | { url: string };
 }
 
-export interface LineLayer extends LayerBase {
+export interface LineLayer extends LayerBase, Tappable {
   type: 'line';
   color: string;
   width: number;
   opacity: number;
   /** Leaflet's `dashArray`, e.g. `"6 4"`. */
   dash?: string;
-  popup?: string;
 }
 
-export interface PolygonLayer extends LayerBase {
+export interface PolygonLayer extends LayerBase, Tappable {
   type: 'polygon';
   fill: string;
   fillOpacity: number;
   outline: string;
   outlineWidth: number;
   outlineOpacity: number;
-  popup?: string;
 }
 
-export interface CircleLayer extends LayerBase {
+export interface CircleLayer extends LayerBase, Tappable {
   type: 'circle';
   fill: string;
   fillOpacity: number;
@@ -95,7 +106,6 @@ export interface CircleLayer extends LayerBase {
   strokeOpacity: number;
   /** Pixels, the same at every zoom. */
   radius: number;
-  popup?: string;
 }
 
 export interface HeatmapLayer extends LayerBase {
@@ -148,17 +158,6 @@ const GEOMETRIES: Record<LayerType, readonly string[]> = {
   circle: ['Point', 'MultiPoint'],
   heatmap: ['Point', 'MultiPoint'],
 };
-
-/** Fill `{key}` in `template` from `props`, as text. A key the feature
- *  lacks, or whose value is not a string, number or boolean, fills empty. */
-export function popupText(template: string, props: Record<string, unknown>): string {
-  return template.replace(/\{([^{}]{1,64})\}/g, (_, key: string) => {
-    const v = props[key.trim()];
-    return typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean'
-      ? String(v)
-      : '';
-  });
-}
 
 /** Whether `url` is one a layer may fetch: relative to the page, or http(s). */
 export function layerUrlAllowed(url: string): boolean {
@@ -342,8 +341,12 @@ function readLayer(raw: unknown, i: number): Read<MapLayer> {
     layer = heat;
   }
   if (layer.type !== 'heatmap') {
-    const popup = f.text('popup');
-    if (popup !== undefined) layer.popup = popup;
+    const popup = readPopup(raw.popup, `${at}.popup`);
+    if (!popup.ok) return popup;
+    if (popup.value !== undefined) layer.popup = popup.value;
+    const tooltip = f.text('tooltip');
+    if (tooltip !== undefined) layer.tooltip = tooltip;
+    if (raw.clickable === true) layer.clickable = true;
   }
   return f.error ? { ok: false, error: f.error } : { ok: true, value: layer };
 }

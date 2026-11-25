@@ -27,16 +27,23 @@
  * it is a hook over a JSON snapshot (`mountWithSnapshot`), whose writes stay
  * on the page. With no hook it draws its props.
  *
- * Text reaches the page only as text nodes.
+ * A tap on a marker, a point or a GeoJSON feature fires
+ * `cw-map-feature-click` on the element the map was mounted on (`FeatureClick`),
+ * and the handle's `setView` moves the map, so a page can zoom to what was
+ * tapped. `cooperativeGestures` lets Ctrl or Cmd with the wheel zoom.
+ *
+ * Text reaches the page only as text nodes; a popup card's link only as an
+ * http(s) URL (`core/map-card.ts`).
  */
 import {
   type SnapshotOptions,
   mountFromSnapshot,
 } from '@claude-workspaces/core/component-snapshot';
 import { type Basemap, basemapOf } from '@claude-workspaces/core/map-basemaps';
+import type { MapPopup } from '@claude-workspaces/core/map-card';
 import { type MapSpec, readMapSpec } from '@claude-workspaces/core/map-spec';
 import type { StateHook } from '@claude-workspaces/core/mdx-component-runtime';
-import { type KeyedBase, type LiveMap, createLiveMap } from './draw.ts';
+import { type FeatureHit, type KeyedBase, type LiveMap, createLiveMap } from './draw.ts';
 import { LayerControl, type LayersNow } from './layer-control.ts';
 import { readLayers } from './layers.ts';
 import { whenPlaced } from './placed.ts';
@@ -61,9 +68,26 @@ export type MapRow = {
   lat: number;
   lng: number;
   label?: string;
-  popup?: string;
+  /** Text, or a card: `{ title?, lines?, link?: { href, text? } }`. */
+  popup?: MapPopup;
+  /** Shown on hover, as text. */
+  tooltip?: string;
   category?: string;
 };
+
+/** The event a tap on a feature fires on the mount element. */
+export const FEATURE_CLICK = 'cw-map-feature-click';
+
+/** `detail` of `cw-map-feature-click`. `layer` is `markers`, `points` or a
+ *  GeoJSON layer's id; `item` is the row as given, or the feature's
+ *  properties. */
+export interface FeatureClick {
+  layer: string;
+  index: number;
+  item: Record<string, unknown>;
+  lat: number;
+  lng: number;
+}
 
 /** A ring around every marker: feet as a number, or an object. */
 export type MapRingProp =
@@ -88,8 +112,13 @@ export type MapLayerProp = {
    *  map takes it off and puts it back as the zoom returns. */
   minZoom?: number;
   maxZoom?: number;
-  /** `{key}` is filled from each feature's properties, as text. */
-  popup?: string;
+  /** Text or a card; each `{key}` is filled from the feature's properties,
+   *  as text. Not on a heatmap. */
+  popup?: MapPopup;
+  /** Shown on hover, a `{key}` template like `popup`. */
+  tooltip?: string;
+  /** Takes taps for `cw-map-feature-click` with no popup or tooltip. */
+  clickable?: boolean;
 } & (
   | { type: 'line'; color?: string; width?: number; opacity?: number; dash?: number[] | string }
   | {
@@ -129,6 +158,9 @@ export type MapHandle = (() => void) & {
    *  the row shows the change. An id the map does not draw changes nothing
    *  now and holds if a layer with that id arrives later. */
   setVisible(id: string, on: boolean): void;
+  /** Move the view to `center`, at `zoom` or the current zoom. A view the
+   *  map has not drawn yet is set once it draws. */
+  setView(center: [number, number], zoom?: number): void;
 };
 
 /** What a host passes the map. Every field is optional except that a map
@@ -148,6 +180,9 @@ export type MapProps = {
   /** Pixels, 160 to 1200; 480 by default. */
   height?: number;
   legend?: boolean;
+  /** Ctrl or Cmd with the wheel zooms; a plain wheel scrolls the page and
+   *  says so. Off by default: the wheel never zooms. */
+  cooperativeGestures?: boolean;
   /** `osm`, `carto-light` (drawn on OpenStreetMap) or `google`. */
   basemap?: string;
   /** The key for a basemap that needs one (Google's browser key). */
@@ -244,6 +279,22 @@ export default function mount(
   let gone = false;
   // Set while `draw` runs, whose own paint puts the layers.
   let drawing = false;
+  let merged: Record<string, unknown> = props;
+  let wanted: { center: [number, number]; zoom?: number } | null = null;
+
+  const tapped = (hit: FeatureHit): void => {
+    const rows = hit.layer === 'markers' || hit.layer === 'points' ? merged[hit.layer] : null;
+    const row = Array.isArray(rows) ? rows[hit.index] : undefined;
+    const item = hit.properties ?? (isRecord(row) ? row : {});
+    const detail: FeatureClick = {
+      layer: hit.layer,
+      index: hit.index,
+      item,
+      lat: hit.lat,
+      lng: hit.lng,
+    };
+    el.dispatchEvent(new CustomEvent(FEATURE_CLICK, { detail, bubbles: true }));
+  };
 
   // The layers redraw on their own when a file arrives or a switch flips.
   const putLayers = (now: LayersNow): void => {
@@ -286,7 +337,7 @@ export default function mount(
           };
         }
         slot.dataset.basemap = choice.name;
-        live = createLiveMap(slot, choice.base, keyed);
+        live = createLiveMap(slot, choice.base, keyed, { onFeature: tapped });
       }
       const layers = control.current();
       const view = viewOf(spec, layers.frame);
@@ -295,6 +346,9 @@ export default function mount(
       const drawn = live.draw(spec, view !== framed);
       framed = view;
       drawnSpec = spec;
+      // A view the page asked for before the first draw, over the fitted one.
+      if (wanted) live.setView(wanted.center, wanted.zoom);
+      wanted = null;
       slot.dataset.markers = String(drawn.markers);
       slot.dataset.rings = String(drawn.rings);
       slot.dataset.points = String(drawn.points);
@@ -306,7 +360,7 @@ export default function mount(
   };
 
   const draw = (): void => {
-    const merged = withState(props, state?.get());
+    merged = withState(props, state?.get());
     const words = (key: 'title' | 'subtitle' | 'note', node: HTMLElement) =>
       say(node, typeof merged[key] === 'string' ? (merged[key] as string) : '');
     words('title', title);
@@ -366,6 +420,12 @@ export default function mount(
   return Object.assign(cleanup, {
     setVisible: (id: string, on: boolean): void => {
       if (!gone) control.setVisible(id, on);
+    },
+    setView: (center: [number, number], zoom?: number): void => {
+      if (gone) return;
+      const at = zoom === undefined ? { center } : { center, zoom };
+      if (live && drawnSpec) live.setView(at.center, at.zoom);
+      else wanted = at;
     },
   });
 }

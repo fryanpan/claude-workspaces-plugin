@@ -6,7 +6,11 @@
  * It draws a spec `core/map-spec.ts` has already judged, on the basemap
  * `core/map-basemaps.ts` names. Markers and rings are SVG paths, so each is
  * an element a test can count and a reader can tap; the points, which run to
- * thousands, share one canvas. Popups are built when opened, as text nodes.
+ * thousands, share one canvas. Popups and tooltips are built when opened, as
+ * text nodes (`popup-node.ts`). A tap on a marker, a point or a GeoJSON
+ * feature is handed to `onFeature`, which `map.ts` turns into a DOM event. A
+ * wheel over the map zooms only under `cooperativeGestures`, and then only
+ * with Ctrl or Cmd held; a plain wheel shows a hint and scrolls the page.
  * A basemap drawn by its provider's own script (Google's) goes under the same
  * layers through `google.ts`.
  *
@@ -19,6 +23,7 @@ import type { MapSpec } from '@claude-workspaces/core/map-spec';
 import L from 'leaflet';
 import { LayerStack, type ReadyLayer } from './draw-layers.ts';
 import { addGoogleLayer } from './google.ts';
+import { popupNode, tooltipNode } from './popup-node.ts';
 
 /** What the slot carries once drawn: how many of each layer went on. */
 export interface MapDrawn {
@@ -27,12 +32,24 @@ export interface MapDrawn {
   points: number;
 }
 
-const popupOf = (words: string) => () => {
-  const p = document.createElement('div');
-  p.className = 'cw-map-popup';
-  p.textContent = words;
-  return p;
-};
+/** A tap on something the map drew. `layer` is `markers`, `points`, or the
+ *  GeoJSON layer's id; `index` is the row's or the feature's position. */
+export interface FeatureHit {
+  layer: string;
+  index: number;
+  lat: number;
+  lng: number;
+  /** A GeoJSON feature's properties. */
+  properties?: Record<string, unknown>;
+}
+
+export interface LiveMapHooks {
+  onFeature?: (hit: FeatureHit) => void;
+}
+
+/** What a plain wheel over a cooperative map says. */
+export const gestureHint = (mac: boolean): string =>
+  mac ? 'Use ⌘ + scroll to zoom the map' : 'Use Ctrl + scroll to zoom the map';
 
 /** For a basemap its provider's script draws: the key the host handed the
  *  map, the basemap to draw instead if the provider cannot, and who to tell. */
@@ -59,6 +76,8 @@ export interface LiveMap {
   setLayers(ready: readonly ReadyLayer[], hidden: ReadonlySet<string>, refit: boolean): void;
   /** Switch one GeoJSON layer on or off. */
   showLayer(id: string, on: boolean): void;
+  /** Move the view; `zoom` defaults to the current one. */
+  setView(center: [number, number], zoom?: number): void;
   /** Cells the visible heatmaps stamped on their last redraw. */
   heatCells(): number;
   remove(): void;
@@ -66,16 +85,54 @@ export interface LiveMap {
 
 /** Start a map with its basemap on `slot`. It removes itself once the slot
  *  leaves the page. */
-export function createLiveMap(slot: HTMLElement, base: Basemap, keyed?: KeyedBase): LiveMap {
+export function createLiveMap(
+  slot: HTMLElement,
+  base: Basemap,
+  keyed?: KeyedBase,
+  hooks: LiveMapHooks = {},
+): LiveMap {
   const map = L.map(slot, {
-    // A doc scrolls; a wheel over the map scrolls the doc, not the map.
-    scrollWheelZoom: false,
+    // On, but a wheel reaches Leaflet only through `wheelGate` below.
+    scrollWheelZoom: true,
     // Sized by the ResizeObserver below; Leaflet's own window listener would
     // outlive a map whose block was redrawn.
     trackResize: false,
     zoomSnap: 0.25,
   });
   map.attributionControl.setPrefix(false);
+  const doc = slot.ownerDocument;
+  const hit = (layer: string, index: number, at: L.LatLng, properties?: Record<string, unknown>) =>
+    hooks.onFeature?.({
+      layer,
+      index,
+      lat: at.lat,
+      lng: at.lng,
+      ...(properties ? { properties } : {}),
+    });
+
+  // A doc scrolls; a wheel over the map scrolls the doc, not the map, unless
+  // the spec asks for cooperative gestures and Ctrl or Cmd is held. Caught on
+  // the way down, before Leaflet's own listener on the same element.
+  let cooperative = false;
+  const hint = doc.createElement('div');
+  hint.className = 'cw-map-gesture-hint';
+  hint.setAttribute('aria-hidden', 'true');
+  const mac = /Mac|iPhone|iPad/.test(doc.defaultView?.navigator.platform ?? '');
+  hint.textContent = gestureHint(mac);
+  slot.appendChild(hint);
+  let hintTimer: ReturnType<typeof setTimeout> | undefined;
+  const wheelGate = (e: WheelEvent): void => {
+    if (cooperative && (e.ctrlKey || e.metaKey)) {
+      hint.classList.remove('is-shown');
+      return;
+    }
+    e.stopImmediatePropagation();
+    if (!cooperative) return;
+    hint.classList.add('is-shown');
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(() => hint.classList.remove('is-shown'), 1200);
+  };
+  slot.addEventListener('wheel', wheelGate, { capture: true });
   if (base.script) {
     if (!keyed) throw new Error(`${base.label} needs a key`);
     addGoogleLayer(map, base.script, keyed.key, base.maxZoom, (why) => {
@@ -97,7 +154,15 @@ export function createLiveMap(slot: HTMLElement, base: Basemap, keyed?: KeyedBas
   const svg = L.svg();
   let layers: L.LayerGroup | null = null;
   // The GeoJSON layers draw on the points' renderer, beneath the points.
-  const stack = new LayerStack(map, canvas);
+  const stack = new LayerStack(map, canvas, (id, index, at, props) => hit(id, index, at, props));
+  /** A row's popup and hover tooltip, each built when it opens. */
+  const dress = (dot: L.CircleMarker, row: MapSpec['markers'][number]): void => {
+    const { popup, tooltip } = row;
+    if (popup !== undefined) dot.bindPopup(() => popupNode(doc, popup));
+    if (tooltip !== undefined) {
+      dot.bindTooltip(() => tooltipNode(doc, tooltip), { direction: 'top', offset: [0, -6] });
+    }
+  };
   let last: MapSpec | null = null;
 
   // The column can change width after the first draw (a sidebar opens, the
@@ -126,16 +191,19 @@ export function createLiveMap(slot: HTMLElement, base: Basemap, keyed?: KeyedBas
     draw(spec, refit) {
       layers?.remove();
       const group = L.layerGroup();
-      for (const p of spec.points) {
+      cooperative = spec.cooperativeGestures;
+      for (const [i, p] of spec.points.entries()) {
+        const interactive = p.popup !== undefined || p.tooltip !== undefined;
         const dot = L.circleMarker([p.lat, p.lng], {
           renderer: canvas,
           radius: 3,
           stroke: false,
           fillColor: p.color,
           fillOpacity: 0.85,
-          interactive: p.popup !== undefined,
+          interactive,
         }).addTo(group);
-        if (p.popup !== undefined) dot.bindPopup(popupOf(p.popup));
+        dress(dot, p);
+        if (interactive) dot.on('click', (e: L.LeafletMouseEvent) => hit('points', i, e.latlng));
       }
       for (const m of spec.markers) {
         for (const r of spec.rings) {
@@ -151,7 +219,7 @@ export function createLiveMap(slot: HTMLElement, base: Basemap, keyed?: KeyedBas
           }).addTo(group);
         }
       }
-      for (const m of spec.markers) {
+      for (const [i, m] of spec.markers.entries()) {
         const dot = L.circleMarker([m.lat, m.lng], {
           renderer: svg,
           radius: 7,
@@ -161,7 +229,8 @@ export function createLiveMap(slot: HTMLElement, base: Basemap, keyed?: KeyedBas
           fillOpacity: 1,
           className: 'cw-map-marker',
         }).addTo(group);
-        if (m.popup !== undefined) dot.bindPopup(popupOf(m.popup));
+        dress(dot, m);
+        dot.on('click', (e: L.LeafletMouseEvent) => hit('markers', i, e.latlng));
       }
       // Leaflet holds back a layer added to a map with no view yet, so on a
       // first draw the view goes first and the layers are placed in it.
@@ -182,8 +251,16 @@ export function createLiveMap(slot: HTMLElement, base: Basemap, keyed?: KeyedBas
     showLayer(id, on) {
       stack.show(id, on);
     },
+    setView(center, zoom) {
+      const go = () => map.setView(center, zoom ?? map.getZoom());
+      // Leaflet drops a setView made while a zoom animates, so wait it out.
+      if ((map as L.Map & { _animatingZoom?: boolean })._animatingZoom) map.once('zoomend', go);
+      else go();
+    },
     heatCells: () => stack.heatCells(),
     remove() {
+      clearTimeout(hintTimer);
+      slot.removeEventListener('wheel', wheelGate, { capture: true });
       resized?.disconnect();
       stack.remove();
       map.remove();
