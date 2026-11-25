@@ -6,11 +6,13 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   DRIFT_LIMIT,
   LINE_LIMIT,
+  ROW_WORD_LIMIT,
   audit,
   countLines,
   isScannable,
   listedPaths,
   rowCounts,
+  rowWords,
 } from './loc-audit';
 
 const dirs: string[] = [];
@@ -186,6 +188,32 @@ describe('audit', () => {
     const result = audit(root);
     expect(result.unlisted).toEqual([]);
     expect(result.drifted).toEqual([{ path: 'packages/demo/src/grown.ts', lines: over, listed }]);
+  });
+
+  it('counts a row’s words after its Lines cell, so the path and count are free', () => {
+    const words = rowWords(
+      '| `packages/a/src/one.ts` | 1,200 | Keep | one two three |\nsee `packages/a/src/two.ts` | 9 | prose |',
+    );
+    expect([...words]).toEqual([['packages/a/src/one.ts', 4]]);
+  });
+
+  it('fails a row whose verdict and reason run past the word limit, and only that row', () => {
+    const root = fixture();
+    writeLines(root, 'packages/demo/src/wordy.ts', 900);
+    writeLines(root, 'packages/demo/src/terse.ts', 900);
+    const reason = (n: number): string => Array.from({ length: n }, () => 'word').join(' ');
+    // The verdict cell is one word, so these reasons put the rows at the limit and one past it.
+    writeDoc(
+      root,
+      `| \`packages/demo/src/wordy.ts\` | 900 | Keep | ${reason(ROW_WORD_LIMIT)} |\n` +
+        `| \`packages/demo/src/terse.ts\` | 900 | Keep | ${reason(ROW_WORD_LIMIT - 1)} |`,
+    );
+
+    const result = audit(root);
+    expect(result.unlisted).toEqual([]);
+    expect(result.wordy).toEqual([
+      { path: 'packages/demo/src/wordy.ts', words: ROW_WORD_LIMIT + 1 },
+    ]);
   });
 
   it('refuses to pass when the exceptions doc is missing', () => {
