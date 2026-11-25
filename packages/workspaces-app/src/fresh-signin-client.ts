@@ -99,12 +99,12 @@ export async function sendCounted(
     const why = doc.createElement('p');
     const name = doc.createElement('b');
     name.textContent = req.name;
-    // The name sits mid-sentence: it can start in lower case ("what bob@…
-    // can do"), which would open a sentence wrongly.
+    // The name sits mid-sentence: it can start in lower case (an address),
+    // which would open a sentence wrongly.
     why.append(
-      `${req.gerund} needs a sign-in from the last 10 minutes, and no passkey is set up yet. Until you sign in again, `,
+      `${req.gerund} needs a sign-in from the last 10 minutes, and no passkey is set up yet, so `,
       name,
-      ' stays as it is.',
+      ' waits until you sign in again.',
     );
     if (!(await ask(doc, "Confirm it's you", why, 'Cancel', 'Sign in again'))) break;
     const leaving = doc.createElement('p');

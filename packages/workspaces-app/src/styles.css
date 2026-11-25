@@ -912,9 +912,11 @@ body.is-reading-width #editor > .ProseMirror {
 .comment-pill:active {
   transform: scale(0.94);
 }
-/* A view member's page offers no way to start a comment (doc-gates.ts sets
-   `role-view`): the server would refuse it. */
-body.role-view .comment-pill {
+/* A view member's page offers no way to start a comment, reply or resolve
+   (doc-gates.ts sets `role-view`): the server would refuse each. */
+body.role-view .comment-pill,
+body.role-view .thread .thread-reply,
+body.role-view .thread .thread-resolve {
   display: none !important;
 }
 /* Slightly dimmer when the pill is offering a caret-only (tap-to-comment)

@@ -132,7 +132,16 @@ export class ThreadPanel {
   /** Hash of what we last rendered. Skip re-render when nothing display-relevant changed. */
   private lastRenderKey = '';
 
-  constructor(private opts: ThreadPanelOpts) {}
+  constructor(private opts: ThreadPanelOpts) {
+    // The empty state's words depend on the reader's role (`role-view`, set
+    // by `doc-gates.ts`), which can arrive after the list was drawn. The
+    // render is memoized on a key that includes it, so a class change that
+    // is not the role redraws nothing.
+    new MutationObserver(() => this.render()).observe(document.body, {
+      attributes: true,
+      attributeFilter: ['class'],
+    });
+  }
 
   /** The first sync landed — from here on, an empty list really is empty. */
   markSynced(): void {

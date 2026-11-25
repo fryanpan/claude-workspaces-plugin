@@ -89,6 +89,10 @@ describe('sendCounted', () => {
       expect(card()).toEqual({ title: "Confirm it's you", buttons: ['Cancel', 'Sign in again'] }),
     );
     expect(document.querySelector('.fresh-signin-prompt b')?.textContent).toBe(ARCHIVE.name);
+    // The name sits mid-sentence, so one that starts in lower case reads right.
+    expect(document.querySelector('.fresh-signin-prompt b')?.parentElement?.textContent).toMatch(
+      new RegExp(`, so ${ARCHIVE.name} waits until you sign in again\\.$`),
+    );
     await answer("Confirm it's you", 'Cancel');
     expect(await pending).toBeNull();
     expect(toast).toHaveBeenCalledWith('Nothing changed');

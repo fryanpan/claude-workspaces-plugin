@@ -12,6 +12,7 @@ import {
   resumeHeld,
   sendCounted,
 } from '../fresh-signin-client.ts';
+import { type AccessRole, levelLabel } from './board-member-level.ts';
 
 /** What the access writes read back: the page's `send` reply, filled in. */
 export interface AccessReply {
@@ -48,7 +49,8 @@ export function roleRequest(workspaceId: string, match: string, role: string): C
     verb: 'Change',
     gerund: 'Changing what someone can do',
     noun: 'access change',
-    name: `what ${match} can do`,
+    // The level it is for, so the card it comes back to says what it does.
+    name: `${match.startsWith('@') ? `everyone at ${match}` : match} to ${levelLabel(role as AccessRole)}`,
   };
 }
 
