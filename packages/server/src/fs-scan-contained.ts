@@ -27,6 +27,20 @@ export const WALK_SLICE = { entries: 1_000 };
 
 type Walk<T> = Generator<number, T>;
 
+/** `items.map(fn)` minus the nulls, giving the event loop a turn between slices. */
+export async function mapSliced<T, U>(
+  items: readonly T[],
+  fn: (item: T) => U | null,
+): Promise<U[]> {
+  const out: U[] = [];
+  for (let i = 0; i < items.length; i++) {
+    if (i > 0 && i % WALK_SLICE.entries === 0) await new Promise((r) => setImmediate(r));
+    const u = fn(items[i] as T);
+    if (u !== null) out.push(u);
+  }
+  return out;
+}
+
 function runSync<T>(walk: Walk<T>): T {
   for (let step = walk.next(); ; step = walk.next()) if (step.done) return step.value;
 }

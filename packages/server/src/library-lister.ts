@@ -1,6 +1,6 @@
 import type { Stats } from 'node:fs';
 import { join } from 'node:path';
-import { WALK_SLICE } from './fs-scan-contained.ts';
+import { mapSliced } from './fs-scan-contained.ts';
 import { GitListingFailed, scanFolderPaths, scanFolderPathsAsync } from './fs-scan.ts';
 import { boundFiles } from './slow-fs.ts';
 
@@ -125,11 +125,6 @@ function statAll(root: string, rels: readonly string[]): ProjectFile[] {
 }
 
 /** `statAll`, giving the event loop a turn between slices of the walk's size. */
-async function statSliced(root: string, rels: readonly string[]): Promise<ProjectFile[]> {
-  const files: ProjectFile[] = [];
-  for (let i = 0; i < rels.length; i += WALK_SLICE.entries) {
-    if (i > 0) await new Promise((resolve) => setImmediate(resolve));
-    files.push(...statAll(root, rels.slice(i, i + WALK_SLICE.entries)));
-  }
-  return files;
+function statSliced(root: string, rels: readonly string[]): Promise<ProjectFile[]> {
+  return mapSliced(rels, (rel) => statOne(root, rel));
 }

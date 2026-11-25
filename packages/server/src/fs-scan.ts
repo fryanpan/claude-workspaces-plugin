@@ -4,6 +4,7 @@ import { isUnsupportedType } from './folder-file-types.ts';
 import {
   containedRoot,
   includedStat,
+  mapSliced,
   readdirContained,
   readdirContainedAsync,
   readdirPlain,
@@ -269,17 +270,22 @@ const LISTING_ARGS = ['--cached', '--others', '--exclude-standard'];
 function admitGitListed(root: string, rels: string[], skipped: SkippedFile[] | null): string[] {
   const out: string[] = [];
   for (const rel of rels) {
-    if (!isSafeGitName(rel)) continue;
-    const name = rel.split('/').pop() ?? rel;
-    const reason = isCredentialShapedName(name)
-      ? 'credential-name'
-      : isUnsupportedType(name)
-        ? 'unsupported-type'
-        : null;
-    if (reason) skipped?.push({ path: rel, reason });
-    else out.push(join(root, rel));
+    const abs = admitOne(root, rel, skipped);
+    if (abs !== null) out.push(abs);
   }
   return out;
+}
+
+function admitOne(root: string, rel: string, skipped: SkippedFile[] | null): string | null {
+  if (!isSafeGitName(rel)) return null;
+  const name = rel.split('/').pop() ?? rel;
+  const reason = isCredentialShapedName(name)
+    ? 'credential-name'
+    : isUnsupportedType(name)
+      ? 'unsupported-type'
+      : null;
+  if (reason) skipped?.push({ path: rel, reason });
+  return reason ? null : join(root, rel);
 }
 
 /**
@@ -310,13 +316,15 @@ export async function scanFolderPathsAsync(
         });
   let files: string[];
   noteListing(root, rels !== null);
-  if (rels !== null) files = admitGitListed(root, rels, null);
+  // Sliced like the walk: 200k paths took ~280ms to admit and spell back.
+  if (rels !== null) files = await mapSliced(rels, (rel) => admitOne(root, rel, null));
   else if (barred || (await repoKindAsync(root)) === 'not-a-repo') {
     files = await readdirRecursiveAsync(root);
   }
   // Rejects, so the cache keeps the listing it had (see `listFolderOrThrow`).
   else throw new GitListingFailed(root);
-  return toSortedRel(root, withIncluded(root, files, include));
+  const listed = withIncluded(root, files, include);
+  return (await mapSliced(listed, (abs) => relative(root, abs).split(sep).join('/'))).sort();
 }
 
 /**
