@@ -190,6 +190,11 @@ describe('relay:install', () => {
       seatsText: SEATS,
       projects: ['riverbend'],
       outputs: () => OUTPUTS,
+      localOutputs: () => ({
+        ...OUTPUTS,
+        tunnels: {},
+        routerRoutes: { riverbend: 'riverbend-boards.example.test/*' },
+      }),
       fetch: (url, init) => {
         if (url.endsWith('/revoke')) events.push('revoke');
         return fetch(
@@ -327,6 +332,13 @@ describe('relay:install', () => {
     expect(text).toContain("would mint the relay's token on riverbend");
     expect(text).toContain('would set on cw-riverbend');
     expect(text).toContain('restarts the machine');
+    // --no-terraform-outputs: no state is read, and the host is the local config's.
+    h.io.outputs = () => {
+      throw new Error('no backend.hcl and no CLOUDFLARE_ACCOUNT_ID');
+    };
+    await expect(runInstall(opts(dryHome, { dryRun: true }), h.io)).rejects.toThrow('CLOUDFLARE');
+    expect(await runInstall(opts(dryHome, { dryRun: true, noOutputs: true }), h.io)).toBe(0);
+    expect(text0(h)).toContain('https://riverbend-boards.example.test');
   });
 
   it('installs: tasks, tokens, a 600 config the relay accepts, the agent, the secrets', async () => {
@@ -480,14 +492,9 @@ describe('relay:install', () => {
   it('names the board flag when a seat has no board to find', async () => {
     const h = harness(tmp('relay-install-none-'));
     h.io.seatsText = SEATS.replace(TEAM_LEAD, 'agent-nobody');
-    await expect(runInstall(opts(h.io.home, { dryRun: true }), h.io)).rejects.toThrow(
-      'pass --board team-lead=<board id>',
-    );
-    expect(
-      await runInstall(
-        opts(h.io.home, { dryRun: true, boards: new Map([['team-lead', macBoard]]) }),
-        h.io,
-      ),
-    ).toBe(0);
+    const dry = (boards: Map<string, string>) =>
+      runInstall(opts(h.io.home, { dryRun: true, boards }), h.io);
+    await expect(dry(new Map())).rejects.toThrow('pass --board team-lead=<board id>');
+    expect(await dry(new Map([['team-lead', macBoard]]))).toBe(0);
   });
 });
