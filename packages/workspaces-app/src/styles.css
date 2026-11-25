@@ -2329,6 +2329,12 @@ body.composer-open #editor > .ProseMirror ::selection {
   line-height: 1.4;
   color: var(--fg-muted);
 }
+/* In the doc's floating composer the note sits above the box, inset to the
+   quote's 14px rather than on the composer's border. */
+#composer > .not-sent {
+  margin: 0;
+  padding: 8px 14px 0;
+}
 
 /* ================= RECEIPT (the other half of "did that land") ==========
    The mark beside a comment YOU wrote: one grey tick, the server has it;
