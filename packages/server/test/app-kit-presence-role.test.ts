@@ -22,7 +22,7 @@ describe('the app kit presence client', () => {
       port: 0,
       hostname: '127.0.0.1',
       fetch(req, srv) {
-        return srv.upgrade(req) ? undefined : new Response('no', { status: 400 });
+        return srv.upgrade(req, { data: {} }) ? undefined : new Response('no', { status: 400 });
       },
       websocket: {
         open(ws) {
@@ -39,11 +39,11 @@ describe('the app kit presence client', () => {
     const presence = connectPresence(`ws://127.0.0.1:${server.port}/presence`, { retryMs: 10 });
     presence.onRole((r) => seen.push(r));
     try {
-      await waitFor(() => seen.includes(null), { what: 'the role to be reported gone' });
+      await waitFor(() => seen.includes(null), { describe: 'the role to be reported gone' });
       expect(seen).toEqual(['edit', null]);
       expect(presence.role()).toBeNull();
       // A refused reconnect does not report it again.
-      await waitFor(() => opened >= 2, { what: 'a reconnect' });
+      await waitFor(() => opened >= 2, { describe: 'a reconnect' });
       expect(seen).toEqual(['edit', null]);
     } finally {
       presence.close();
