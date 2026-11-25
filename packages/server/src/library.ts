@@ -112,7 +112,7 @@ export interface LibraryPayload {
   starred?: Array<{ kind: 'doc' | 'folder'; id: string; at: number }>;
 }
 
-export type { ProjectFile } from './library-lister.ts';
+export type { MarkdownLister, ProjectFile } from './library-lister.ts';
 export { birthOf, createMarkdownLister } from './library-lister.ts';
 
 /** One file in the project's mounted folders. */

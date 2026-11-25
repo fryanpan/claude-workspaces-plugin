@@ -10,6 +10,7 @@ import { starsFor } from '../library-stars.ts';
 import { personKeyOf, viewsFor } from '../library-views.ts';
 import {
   type LibrarySources,
+  type MarkdownLister,
   type ProjectFile,
   birthOf,
   buildLibrary,
@@ -71,7 +72,7 @@ export interface LibraryRoutesContext {
   /** Take a doc filed here out of the default holding board. */
   unfileFromDefault: (attachmentId: string, keptBoardWorkspaceId: string) => void;
   /** The project's markdown files — cached, see `createMarkdownLister`. */
-  markdownFiles: (root: string) => readonly ProjectFile[];
+  markdownFiles: MarkdownLister;
   /** The request's SOCKET address, never a header. */
   requestAddress: (req: Request) => string | undefined;
   /** Whether an attachment set keeps its files on this machine
@@ -131,7 +132,20 @@ export async function handleLibraryRoutes(
   if (!scope || (!items && !open)) return undefined;
   if (items && req.method === 'GET') {
     const onBox = !visitor && isOnBox(ctx, req);
-    const src = sourcesFor(ctx, scope, onBox);
+    // The project's listing is built with the event loop free (`ready`),
+    // then handed to the build, which is synchronous.
+    const listed = new Map<string, readonly ProjectFile[]>();
+    const src = sourcesFor(
+      ctx,
+      scope,
+      onBox,
+      (root) => listed.get(root) ?? ctx.markdownFiles(root),
+    );
+    const repoKey = visitor ? null : projectRepoKey(src.docs, src.docKeyOf);
+    const root = repoKey === null ? null : src.projectRoot(repoKey);
+    if (root !== null && ctx.markdownFiles.ready) {
+      listed.set(root, await ctx.markdownFiles.ready(root));
+    }
     const payload = buildLibrary(visitor ? visitorSources(src) : src);
     const onBoard = new Set(scope.board.docIds);
     const viewer = viewerOf(rq);
