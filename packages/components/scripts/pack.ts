@@ -50,6 +50,7 @@ export const CORE_FILES = [
   'map-basemaps.ts',
   'map-spec.ts',
   'mdx-component-runtime.ts',
+  'tag-props.ts',
 ];
 
 interface Manifest {

@@ -122,7 +122,7 @@ const FELL_BACK: Record<string, (label: string, instead: string) => string> = {
   'no-key': (label, instead) =>
     `${label} is not set up on this server, so this map is drawn on ${instead}.`,
   'not-named': (label, instead) =>
-    `${label} draws only for a basemap="…" written as a quoted string, so this map is drawn on ${instead}.`,
+    `${label} draws only for a basemap="…" written as a string, so this map is drawn on ${instead}.`,
   refused: (label, instead) =>
     `${label} refused this server's key, so this map is drawn on ${instead}.`,
   unloaded: (label, instead) => `${label} did not load, so this map is drawn on ${instead}.`,

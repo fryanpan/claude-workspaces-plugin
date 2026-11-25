@@ -90,7 +90,7 @@ vitest's `node` project runs their tests.
 
 ### `core`
 
-- `core` is three tiers: wire types, the document model (`prose-*.ts`, `anchor/**`, `redline.ts`), then the rules both sides must compute identically (`review-item*.ts`, `effort-*.ts`, `goal-effort.ts`).
+- `core` is three tiers: wire types, the document model (`prose-*.ts`, `anchor/**`, `redline.ts`), then the rules both sides must compute identically (`review-item*.ts`, `effort-*.ts`, `goal-effort.ts`). `tag-props.ts` is one of those rules: the literal reader for an `.mdx` tag's props, which the page draws a component's preview with and the server reads a `<StreetMap src>` with to decide which data file a doc's visitor may fetch, so the two cannot disagree.
 - It imports no other workspace package. `safe-file.ts` and `discovery-file.ts` are the exceptions to its no-I/O rule ([server-edge.md](server-edge.md)).
 - Module placement: [client-and-core.md](client-and-core.md).
 

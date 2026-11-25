@@ -45,6 +45,7 @@
     "./plot-spec": "./src/plot-spec.mjs",
     "./map-spec": "./src/map-spec.ts",
     "./map-basemaps": "./src/map-basemaps.ts",
+    "./tag-props": "./src/tag-props.ts",
     "./plot-chart": "./src/plot-chart.ts",
     "./component-snapshot": "./src/component-snapshot.ts",
     "./trace-privacy": "./src/trace-privacy.ts",
