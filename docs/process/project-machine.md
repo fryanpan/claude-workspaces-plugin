@@ -722,7 +722,20 @@ names its project in `machines.json`, and its agent is that project's lead
 (`<project>-lead`, or the seat's `agentName`). Only Team Lead's seat holds
 `crossOrganization`: a message crosses organizations only when one end holds
 it, so Team Lead reaches every lead and two leads in different organizations
-never reach each other. Run it with `--dry-run` first.
+never reach each other. Run it from prod's checkout, with `--dry-run` first:
+
+```bash
+cd ~/Library/Application\ Support/claude-workspaces/repo
+bun run relay:install --no-terraform-outputs --home-remotes "$CW_HOME_REMOTES_FILE" --dry-run
+```
+
+The Mac holds no Cloudflare token, so its runs pass `--no-terraform-outputs`,
+the flag `machine:deploy` takes for the same reason. With it, each project's
+address is its router host from `router.local.json` (`projectHost`), and
+Access is in front of a project listed in `access.local.json`: the files
+Terraform is given, read without its state. Both files are gitignored, and
+prod's checkout does not have them: copy them in from the checkout
+`cf:sync-config` runs in first, or the script stops and names the missing one.
 The dry run prints the plan with every token value redacted, and it writes,
 mints and files nothing. It does read each server, over `fly ssh console` for
 a project machine.
@@ -746,7 +759,8 @@ The script does these steps in order:
    `~/Library/Application Support/claude-workspaces/relay/relay-config.json`,
    at mode 600, in the shape `relay-config.ts` reads. The script checks the
    config with that parser before it writes. A server's address is the
-   project's router host from the Terraform outputs. A server with Access in
+   project's router host, from the Terraform outputs or, with
+   `--no-terraform-outputs`, from `router.local.json`. A server with Access in
    front needs its seat to name `accessToken`, the Cloudflare service token's
    name. The script reads the token's client id and secret from the Keychain
    under `tokenServices` names. No token value goes into an argument, onto

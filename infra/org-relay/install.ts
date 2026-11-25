@@ -85,6 +85,8 @@ export interface InstallOptions {
   homeRemotes?: string;
   /** Restart the Mac's server when that file changes; off with --no-server-restart. */
   restartServer?: boolean;
+  /** Read each host from the local config, not Terraform's state: --no-terraform-outputs. */
+  noOutputs?: boolean;
 }
 
 export interface InstallIo extends ApiIo {
@@ -93,6 +95,8 @@ export interface InstallIo extends ApiIo {
   seatsText: string;
   projects: string[];
   outputs: () => TfOutputs;
+  /** The same, from the files Terraform is given (`localOutputs`). */
+  localOutputs: () => TfOutputs;
   launchctl: (args: string[]) => RunResult;
   keychain: (service: string) => string;
   now: () => number;
@@ -185,7 +189,8 @@ export async function runInstall(opts: InstallOptions, io: InstallIo): Promise<n
   const say = (line: string) => io.out(`[relay:install] ${line}`);
   const would = opts.dryRun ? 'would ' : '';
   const list = parseSeatList(io.seatsText, io.projects);
-  const servers = serverPlans(list, io.outputs());
+  if (opts.noOutputs) say('reads each host from router.local.json, not Terraform outputs');
+  const servers = serverPlans(list, opts.noOutputs ? io.localOutputs() : io.outputs());
   const paths = relayPaths(io.home);
   const existing = existingConfig(paths);
   const secrets = new Map<string, ServerSecrets>();

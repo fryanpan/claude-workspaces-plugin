@@ -10,9 +10,13 @@
  *   bun run relay:install --home-remotes <path> the file CW_HOME_REMOTES_FILE names
  *                                               (default: that variable)
  *   bun run relay:install --no-server-restart   print the Mac server's restart instead
+ *   bun run relay:install --no-terraform-outputs read each project's host from
+ *                                               router.local.json, for a run with no
+ *                                               Cloudflare token (machine:deploy's flag)
  */
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { localOutputs } from './install-plan.ts';
 import { type InstallOptions, runInstall } from './install.ts';
 
 export function parseArgs(argv: readonly string[]): InstallOptions {
@@ -30,6 +34,7 @@ export function parseArgs(argv: readonly string[]): InstallOptions {
       if (!path) throw new Error('--home-remotes takes the path CW_HOME_REMOTES_FILE names');
       opts.homeRemotes = path;
     } else if (a === '--no-server-restart') opts.restartServer = false;
+    else if (a === '--no-terraform-outputs') opts.noOutputs = true;
     else throw new Error(`unknown argument ${a}`);
   }
   return opts;
@@ -51,6 +56,11 @@ if (import.meta.main) {
       seatsText: readFileSync(join(import.meta.dir, 'seats.json'), 'utf8'),
       projects: readMachines().map((m) => m.project),
       outputs: () => macOutputs('prod'),
+      localOutputs: () =>
+        localOutputs((rel) => {
+          const path = join(import.meta.dir, '..', '..', rel);
+          return existsSync(path) ? readFileSync(path, 'utf8') : null;
+        }),
       fetch: (url, init) => fetch(url, init),
       fly: (args, input) => fly(args, { input }),
       launchctl: (args) => {

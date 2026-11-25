@@ -19,12 +19,13 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { TOKEN_LABEL } from './lead-usage.ts';
 import { keychainCreate, keychainHas, keychainRead } from './mac-ops.ts';
 import type { Machine } from './machines.ts';
 import { isSetupToken } from './org-signin.ts';
 
-const REPO = join(dirname(new URL(import.meta.url).pathname), '..', '..');
+const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const TOKEN_LIST_SLOTS = 32;
 export const tokenSlot = (n: number): string => `claude-token-list-${n}`;
 /** The Mac's walled lead's sign-in, which no org's lead may hold (review H2). */

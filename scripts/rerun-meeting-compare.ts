@@ -23,6 +23,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { RerunReport } from './rerun-meeting-report.ts';
 
 /** Where a run's machine-readable report sits, beside the one people read. */
@@ -239,7 +240,7 @@ export function renderComparison(before: RerunReport, after: RerunReport): strin
 export function headCommit(): string {
   try {
     return execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
-      cwd: dirname(new URL(import.meta.url).pathname),
+      cwd: dirname(fileURLToPath(import.meta.url)),
       encoding: 'utf8',
     }).trim();
   } catch {

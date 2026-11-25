@@ -22,6 +22,7 @@
 import { agentIdForName } from '../../packages/core/src/identity.ts';
 import { parseRelayConfig } from '../../packages/server/src/org-relay/relay-config.ts';
 import type { TfOutputs } from '../cloudflare/outputs.ts';
+import { CONFIG_PATHS, type ReadConfig, staticVars } from '../cloudflare/vars.ts';
 import { signInHost } from '../project-machine/settings.ts';
 
 export const MAC_SERVER = 'mac';
@@ -145,6 +146,38 @@ export interface ServerPlan {
   accessInFront: boolean;
   /** The Cloudflare service token's name, where Access is in front. */
   accessToken?: string;
+}
+
+/**
+ * The outputs `serverPlans` reads, from the local files Terraform is given
+ * (`router.local.json`, `access.local.json`) instead of from its state: for a
+ * run that holds no Cloudflare token, as `machine:deploy --no-terraform-outputs`
+ * is. Each project's host is its router host, `projectHost(label, oneAddress)`,
+ * the value Terraform outputs as its route and `machine:push-board` uses; a
+ * project in the Access file has Access in front. No audience is read: the
+ * relay never needs one. Both files are gitignored, so a checkout that has
+ * never had them copied in stops here: a missing Access file would otherwise
+ * read as no project behind Access.
+ */
+export function localOutputs(read: ReadConfig): TfOutputs {
+  for (const path of [CONFIG_PATHS.prod.router, CONFIG_PATHS.prod.access]) {
+    if (read(path) === null) {
+      throw new Error(
+        `--no-terraform-outputs reads ${path}, and this checkout has none: copy it in from the checkout cf:sync-config runs in`,
+      );
+    }
+  }
+  const vars = staticVars(read);
+  return {
+    access: Object.fromEntries(
+      Object.entries(vars.access_projects).map(([p, a]) => [p, { aud: '', hosts: a.hosts }]),
+    ),
+    accessTeamDomain: null,
+    tunnels: {},
+    routerRoutes: Object.fromEntries(
+      Object.entries(vars.project_hosts).map(([p, host]) => [p, `${host}/*`]),
+    ),
+  };
 }
 
 /** The servers the seats sit on: the Mac, and each project's machine,

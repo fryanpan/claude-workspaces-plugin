@@ -19,6 +19,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { MAX_TARBALL_BYTES, verifyChannel } from './release-manifest.ts';
 import {
   promote,
@@ -33,10 +34,7 @@ import {
 export const DEFAULT_CHANNEL_URL =
   'https://github.com/fryanpan/claude-workspaces-plugin/releases/download/server-channel';
 export const STAGED_EXIT = 10;
-export const BAKED_KEY = join(
-  dirname(new URL(import.meta.url).pathname),
-  'release-signing-key.pub',
-);
+export const BAKED_KEY = join(dirname(fileURLToPath(import.meta.url)), 'release-signing-key.pub');
 
 const say = (line: string) => console.error(`[release] ${line}`);
 

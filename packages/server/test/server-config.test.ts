@@ -16,6 +16,7 @@ import { describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { type ArgReader, resolveServerConfig } from '../src/server-config.ts';
 
 function noArgs(): ArgReader {
@@ -284,7 +285,7 @@ describe('a share audience equal to the owner audience is fatal', () => {
         ].join(''),
       ],
       {
-        cwd: new URL('../../..', import.meta.url).pathname,
+        cwd: fileURLToPath(new URL('../../..', import.meta.url)),
         env: { ...process.env, CW_TEST_ENV_JSON: JSON.stringify(env) },
         stdout: 'pipe',
         stderr: 'pipe',
