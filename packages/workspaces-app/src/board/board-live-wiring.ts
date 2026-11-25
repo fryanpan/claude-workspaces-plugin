@@ -91,6 +91,8 @@ export interface BoardLiveDeps {
   loadAgents: () => Promise<void>;
   loadEvents: () => Promise<void>;
   loadHome: () => Promise<void>;
+  /** Home's "Not on a task" list alone, for the `agent.noted` push. */
+  loadAgentNotes: () => Promise<void>;
   loadReviewItems: () => Promise<void>;
   loadDiscussion: (row: LiveDiscussionRow, quiet?: boolean) => Promise<void>;
   /** The Library's re-read, which skips itself unless the Library is showing. */
@@ -150,6 +152,7 @@ export function wireBoardLive(deps: BoardLiveDeps): {
     loadAgents,
     loadEvents,
     loadHome,
+    loadAgentNotes,
     loadReviewItems,
     loadDiscussion,
     libraryChanged,
@@ -324,6 +327,13 @@ export function wireBoardLive(deps: BoardLiveDeps): {
   for (const name of ['agent.attached', 'agent.detached', 'agent.heartbeat', 'agent.listening']) {
     es.addEventListener(name, () => void loadAgents());
   }
+  // A note no task took was just logged. It is no store event — nothing on
+  // the board changed — so none of the listeners below hear it, and Home's
+  // "Not on a task" list would wait for an unrelated change. The frame is
+  // wordless; the list re-reads its own route. Only while Home is showing.
+  es.addEventListener('agent.noted', () => {
+    if (state.pane === 'home') void loadAgentNotes();
+  });
   // The list lives beside `describeEvent` in board-presence-model, because the two must
   // move together — an event the trail renders but this loop never hears is
   // an Activity tab that silently misses it, on the writer's own screen as

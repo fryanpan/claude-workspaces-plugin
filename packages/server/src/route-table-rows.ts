@@ -592,6 +592,9 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['trusted-local', '/workspaces/:ws/chat-audit', 'GET POST'],
     ['trusted-local', '/workspaces/:ws/chat-audit/:agent', 'GET'],
   ]),
+  ...family('routes/board-agent-notes.ts', [
+    ['trusted-local', '/workspaces/:ws/agent-notes', 'GET'],
+  ]),
 
   ...family('routes/workspace-attachments.ts', [
     ['share-scope', '/workspaces/:ws/agents', 'GET'],

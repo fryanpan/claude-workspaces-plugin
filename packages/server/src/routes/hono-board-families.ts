@@ -36,6 +36,10 @@ import { askedAddress, renderBoardMemberNotFound, renderBoardNotFound } from '..
 import type { BoardWorkspace } from '../tasks.ts';
 import { type AppRoutesContext, handleAppRoutes } from './apps.ts';
 import type { createArchiveRoutes } from './archive.ts';
+import {
+  type BoardAgentNotesRoutesContext,
+  handleBoardAgentNotesRoutes,
+} from './board-agent-notes.ts';
 import { type ChatAuditRoutesContext, handleChatAuditRoutes } from './chat-audit-routes.ts';
 import { type DocMoveRoutesContext, handleDocMoveRoute } from './doc-move.ts';
 import type { DocRoutesContext } from './docs-routes-context.ts';
@@ -77,6 +81,7 @@ export interface HonoBoardFamiliesContext
   workspaceRoutesCtx: WorkspaceRoutesContext;
   taskRoutesCtx: TaskRoutesContext;
   chatAuditRoutesCtx: ChatAuditRoutesContext;
+  boardAgentNotesRoutesCtx: BoardAgentNotesRoutesContext;
   libraryRoutesCtx: LibraryRoutesContext;
   docMoveRoutesCtx: DocMoveRoutesContext;
   handleArchiveRoutes: ReturnType<typeof createArchiveRoutes>['handleArchiveRoutes'];
@@ -303,6 +308,16 @@ export function honoBoardFamilies(ctx: HonoBoardFamiliesContext): HonoBoardFamil
     (app) =>
       claimRows(app, ctx, 'chat-audit-routes.ts', (v, row) =>
         handleChatAuditRoutes(ctx.chatAuditRoutesCtx, {
+          scope: v.scope,
+          req: v.req,
+          row,
+          visitor: v.visitor,
+        }),
+      ),
+    // routes/board-agent-notes.ts — `agent-notes`, Home's "Not on a task".
+    (app) =>
+      claimRows(app, ctx, 'board-agent-notes.ts', (v, row) =>
+        handleBoardAgentNotesRoutes(ctx.boardAgentNotesRoutesCtx, {
           scope: v.scope,
           req: v.req,
           row,

@@ -246,6 +246,16 @@ boundary "filed nothing this turn" is measured from — falls back to the log
 when the in-process ring has nothing, which is what a restarted server used to
 have.
 
+A person reads the log too. `GET /workspaces/<ws>/agent-notes`
+(`routes/board-agent-notes.ts`) groups its last three hours by agent and names
+each group's state with `agent-note-placement.ts`: `undecidable` (the agent
+held several tasks), `unattachable` (it held none), or `attached` (a newer note
+landed on a task). That answer is Home's "Not on a task" list under Recent
+activity. Each logged note also sends a wordless `agent.noted` frame to the
+board's open pages, so the list updates without a reload. The frame skips
+every agent's stream (`skipAgentStreams`), because no agent acts on another
+agent's turn.
+
 ### What every corpus on this page could not see
 
 Both measurements above were read from placed notes — the 913-note run and the
@@ -296,3 +306,5 @@ the next one changes those numbers, and this file, in the same commit.
 - the two top-level modules `unfiled-ask.ts` and `unfiled-ask-filing.ts`, which judge whether a closing message asked the board's owner something with nothing filed. They join the services tier beside `chat-audit.ts` and move nothing in the picture: one is pure text, the other one walk of the task store, and only `routes/dispatch-and-notes.ts` calls either. The doc carries the measured false-positive and false-negative rates, because the count they feed is unreadable without them.
 
 - also gains `agent-note-log.ts`, one more top-level module in the services tier and no new edge. It is the durable half of `agent-notes.ts`'s per-agent ring: a board where one session holds several in-progress rows can place none of its end-of-turn notes, and the ring they fell back to is in-process, twenty deep and read by nothing, so every one of them was dropped. The log appends each unplaced note to `<dataDir>/workspaces/<ws>.agent-notes.jsonl` — its own file rather than a new `TaskStoreEvent`, because a store event is a change to the board and an unplaced note is a record about an agent, and because every consumer of `events.jsonl` keeps an exclusion list that a new type would have to be added to. `routes/dispatch-and-notes.ts` is its only caller, writing on the POST and merging it into the GET.
+
+- also gains `agent-note-placement.ts`, a pure top-level module in the services tier with no new edge. It names the log's `ambiguous` flag as the state a reader is shown and groups the log's recent lines by agent. Its one caller is `routes/board-agent-notes.ts`. The client half, `board/agent-notes-model.ts`, sits inside the `board/` directory the diagram already draws.
