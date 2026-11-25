@@ -379,6 +379,43 @@ export interface StallPayload {
    *  The other reason a lead is woken about a board it does not lead, and
    *  the one that used to be indistinguishable from the line above. */
   unfiledCarry?: UnfiledCarryPayload;
+  /** Set only when the board is on ANOTHER server and its lead is gone: this
+   *  server read it off that board's home feed (`remote-escalations.ts`).
+   *  Numbers only — no remote text rides it. */
+  remote?: RemoteStallPayload;
+}
+
+/** Where a remote dead board lives, when its server first found it dead,
+ *  and how many tasks are stuck there. Every field optional, like the rest. */
+export interface RemoteStallPayload {
+  origin?: string;
+  deadSince?: number;
+  stuck?: number;
+}
+
+/**
+ * A dead board on another server. Its own remedy, because the ordinary
+ * escalation's ("take it with attach_agent") cannot work: this server does
+ * not hold that board, so the reader can only restart the lead where it
+ * runs. The frame carries counts and no rows, so this line names none.
+ */
+function remoteStalledLine(p: StallPayload, frameBoard?: string): string {
+  const r = p.remote ?? {};
+  const seat = p.escalatedFrom ? `Its lead ${p.escalatedFrom}` : 'Its lead';
+  const board = frameBoard ? `board ${frameBoard}` : 'a board';
+  const where = r.origin ? ` on another server (${r.origin})` : ' on another server';
+  const n = r.stuck ?? 0;
+  const stuck = n === 1 ? '1 task is stuck' : `${n} tasks are stuck`;
+  const age =
+    r.deadSince !== undefined && p.ts !== undefined && p.ts >= r.deadSince
+      ? ` for over ${humanDuration(p.ts - r.deadSince)}`
+      : '';
+  return (
+    `[workspace.stalled] Nobody is on ${board}${where}, and ${stuck}. ${seat} has not been ` +
+    `reachable there${age}, and this server cannot reach that board, so attaching here will ` +
+    'not help: restart that lead on its own machine. The board withdraws its item on the ' +
+    "owner's queue once a session is back on it."
+  );
 }
 
 /** The fleet carry's marker: how long every unfiled row has already stood,
@@ -749,6 +786,7 @@ const STALL_PAYLOAD_KEYS: Record<keyof StallPayload, true> = {
   changed: true,
   escalatedFrom: true,
   unfiledCarry: true,
+  remote: true,
   ts: true,
 };
 
@@ -917,6 +955,7 @@ function unfiledCarryLine(carry: UnfiledCarryPayload): string {
  *    swap this clause exists to prevent.
  */
 export function stalledLine(p: StallPayload, frameBoard?: string): string {
+  if (typeof p.remote === 'object' && p.remote !== null) return remoteStalledLine(p, frameBoard);
   const parts: string[] = [];
   const rows = p.rows ?? [];
   const count = p.stalledCount ?? rows.length;

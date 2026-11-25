@@ -785,6 +785,35 @@ describe('stalledLine tells a stand-in why it, and not the lead, was woken', () 
   });
 });
 
+describe('stalledLine for a board on another server', () => {
+  const REMOTE = {
+    escalatedFrom: 'agent-riverbend-lead',
+    remote: { origin: 'riverbend-origin.harborlight.test', deadSince: 0, stuck: 2 },
+    ts: 3 * 60 * 60_000,
+  };
+
+  it('names the seat, the server and the count, and sends the reader to that machine', () => {
+    const line = stalledLine(REMOTE, 'w-riverbend');
+    expect(line.startsWith('[workspace.stalled] ')).toBe(true);
+    expect(line).toContain('agent-riverbend-lead');
+    expect(line).toContain('w-riverbend');
+    expect(line).toContain('riverbend-origin.harborlight.test');
+    expect(line).toContain('2 tasks are stuck');
+    expect(line).toContain('3h');
+    expect(line).toContain('restart');
+    // Attaching here cannot reach a board this server does not hold.
+    expect(line).not.toContain('take it (attach_agent)');
+    // Not the version-skew notice: this bundle knows the field.
+    expect(line).not.toContain('cannot read');
+  });
+
+  it('says one task in the singular, and the seat as unknown when the frame names none', () => {
+    const line = stalledLine({ remote: { ...REMOTE.remote, stuck: 1 } }, 'w-riverbend');
+    expect(line).toContain('1 task is stuck');
+    expect(line).toContain('Its lead');
+  });
+});
+
 /**
  * The OTHER frame a lead reads about a board it is not on: the fleet carry of
  * unfiled waits. Six of them fired between 20 and 22 September rendering as

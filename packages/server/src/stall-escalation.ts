@@ -57,6 +57,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { dirname, join } from 'node:path';
 import { type TaskReviewItem, isReviewItemOpen, reviewWithdrawn } from '@claude-workspaces/core';
 import { taskDeepLink } from './home-brief.ts';
+import type { HomeFeedEscalation } from './home-feed.ts';
 import { STALL_EVENT, type StallNudgeFrame, type StallSnapshot } from './stall-nudge.ts';
 import type { TaskStore } from './tasks.ts';
 
@@ -204,6 +205,10 @@ interface Dead {
    *  answered or withdrew. Those are not asked about again; a row they were
    *  not shown is. */
   seenRowIds?: string[];
+  /** How many rows were stuck on the latest tick, and who holds the seat:
+   *  what the board's home feed tells a Home on another machine. */
+  stuck?: number;
+  lead?: string;
 }
 
 type Sidecar = Record<string, { dead: Dead }>;
@@ -233,6 +238,11 @@ export interface StallEscalationOptions {
    *  `console.error`, like the nudger's — this is the only record that the
    *  server wrote to somebody's queue on its own. */
   report?: (message: string) => void;
+  /** What `deadBoard` reports for a board changed on this tick: its home
+   *  feed has moved, so a Home on another machine must re-read it. Without
+   *  this a board that recovers with no open item to withdraw stays dead on
+   *  that Home until its stream reconnects. */
+  onDeadBoardChange?: (workspaceId: string) => void;
 }
 
 export class StallEscalations {
@@ -241,6 +251,7 @@ export class StallEscalations {
   private readonly escalateMs: number;
   private readonly teamLead: TeamLeadReach | undefined;
   private readonly report: (message: string) => void;
+  private readonly onDeadBoardChange: ((workspaceId: string) => void) | undefined;
   private sidecar: Sidecar = {};
   /** What the file already holds, so an unchanged sidecar costs no write —
    *  this runs once a minute per board forever. */
@@ -252,6 +263,7 @@ export class StallEscalations {
     this.escalateMs = opts.escalateMs ?? STALL_ESCALATE_DEFAULT_MS;
     this.teamLead = opts.teamLead;
     this.report = opts.report ?? ((message) => console.error(message));
+    this.onDeadBoardChange = opts.onDeadBoardChange;
     this.load();
   }
 
@@ -261,6 +273,18 @@ export class StallEscalations {
    * behind it (the caller isolates it too).
    */
   onBoard(board: StallSnapshot, now: number): void {
+    const key = board.workspaceId;
+    const before = JSON.stringify(this.deadBoard(key) ?? null);
+    this.onBoardInner(board, now);
+    if (JSON.stringify(this.deadBoard(key) ?? null) === before) return;
+    try {
+      this.onDeadBoardChange?.(key);
+    } catch (err) {
+      console.error('[stall] dead-board change notice failed:', err);
+    }
+  }
+
+  private onBoardInner(board: StallSnapshot, now: number): void {
     const key = board.workspaceId;
     const prior = this.sidecar[key]?.dead;
     const deadFor = board.retired ? undefined : boardDeadFor(board, now, this.escalateMs);
@@ -291,6 +315,8 @@ export class StallEscalations {
     }
 
     const dead: Dead = prior ?? { since: now };
+    dead.stuck = rows.length;
+    dead.lead = board.leadAgentId;
     // Team Lead first, once per window while the board stays dead — and
     // whether or not the reader already holds an item: Team Lead is the one
     // who can restart the lead, and the item withdraws itself when that
@@ -328,6 +354,17 @@ export class StallEscalations {
       return;
     }
     this.file(key, dead, rows, deadFor ?? this.escalateMs);
+  }
+
+  /** The board's escalation as the home feed carries it, while the board is
+   *  dead with something stuck and THIS server's Team Lead has not been told;
+   *  undefined otherwise. A Home on another machine reads it to tell ITS Team
+   *  Lead (`remote-escalations.ts`), so a death Team Lead already heard here
+   *  is not told twice. */
+  deadBoard(workspaceId: string): HomeFeedEscalation | undefined {
+    const dead = this.sidecar[workspaceId]?.dead;
+    if (!dead || !dead.stuck || dead.teamLeadToldAt !== undefined) return undefined;
+    return { deadSince: dead.since, stuck: dead.stuck, ...(dead.lead ? { lead: dead.lead } : {}) };
   }
 
   /** How many boards hold a live item. Test surface for the pruning that a

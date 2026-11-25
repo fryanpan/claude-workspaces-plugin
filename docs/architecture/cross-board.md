@@ -109,6 +109,20 @@ returns it as `openerProof`. It joins the doc-store group and moves no
 boundary. Tests: `org-relay-two-servers.test.ts` (two real servers),
 `org-relay-units.test.ts`, `org-relay-sender.test.ts`.
 
+**A dead board on another server reaches Team Lead on the Mac.** A board's
+own stall escalation looks for Team Lead only among the boards its server
+holds, and Team Lead's stream is on the Mac, so a project machine whose lead
+dies files its last-resort item for the owner and Team Lead hears nothing.
+The machine's home feed carries the board's escalation while it stands
+(`escalation`: when the board was first found dead, how many tasks are
+stuck, the lead's agent id), and the Mac's stall pass hands each remote
+board's view to `remote-escalations.ts` (Keep-moving group), which sends
+Team Lead one `workspace.stalled` frame per dead stretch with a `remote`
+field naming the origin. The board announces a Home change whenever the
+escalation its feed reports appears or goes, so the Mac re-reads it then. It
+rides the existing pull; nothing new calls the Mac. Tests: `remote-escalations.test.ts`,
+`remote-escalation-across-servers.test.ts`.
+
 **GitHub events for boards on other machines.** GitHub is read once, by the
 broker on the Mac (`~/dev/github-claude-channel`, 127.0.0.1:7902, the
 owner's token). A board on another server holds no GitHub token: it stores a

@@ -321,43 +321,6 @@ export {
 export type { ServerOptions };
 
 /**
- * The typed routes another package's client reads. Re-exported here because
- * only this module may import out of `routes/`, and the MCP child's
- * `hc<MountsApi>` needs the type (never the code) of the app that answers.
- */
-export type { MountsApi } from './routes/mounts-api.ts';
-export type { AgentNotesContract } from './routes/agent-notes-contract.ts';
-export type { AttachmentsContract } from './routes/attachments-contract.ts';
-export type { ShareContract } from './routes/share-contract.ts';
-export type { TaskStateContract } from './routes/task-state-contract.ts';
-export type { TaskContentContract } from './routes/task-content-contract.ts';
-export type { NextAnswer, TaskBoardContract } from './routes/task-board-contract.ts';
-export type { ReviewItemsContract } from './routes/review-items-contract.ts';
-export type { LibraryFoldersContract } from './routes/library-folders-contract.ts';
-export type { DocComponentsContract } from './routes/doc-components-contract.ts';
-export type { PersonContract, PlaceFields } from './routes/person-contract.ts';
-export type { WhiteboardContract } from './routes/whiteboard-contract.ts';
-export type { InboxContract } from './routes/inbox-contract.ts';
-export type { LeadChatFilesContract } from './routes/lead-chat-files-contract.ts';
-export type { WorkspaceBoardContract } from './routes/workspace-board-contract.ts';
-export type {
-  AttachAgentAnswer,
-  WorkspaceAgentsContract,
-} from './routes/workspace-agents-contract.ts';
-export type { DispatchesContract } from './routes/dispatches-contract.ts';
-export type { DocFileContract } from './routes/doc-file-contract.ts';
-export type { LeadMeetingContract } from './routes/lead-meeting-contract.ts';
-export type { AgentMachineContract } from './routes/agent-machine-contract.ts';
-export type { DocEditsContract } from './routes/doc-edits-contract.ts';
-export type { DocLifecycleContract } from './routes/doc-lifecycle-contract.ts';
-export type {
-  DocThreadsContract,
-  ScopedEditFields,
-  ThreadByFindBody,
-  ThreadCreateBody,
-} from './routes/doc-threads-contract.ts';
-
-/**
  * `revisedRange` off a request body: the offsets into the NEW detail that a
  * caller says changed.
  *
@@ -1331,6 +1294,16 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     ...(opts.heldReleaseMs !== undefined ? { heldReleaseMs: opts.heldReleaseMs } : {}),
     ...(opts.keepMovingCadenceMs !== undefined
       ? { keepMovingCadenceMs: opts.keepMovingCadenceMs }
+      : {}),
+    notifyLanding: () => landingChanges.notify('boards'),
+    // A dead board on another server reaches Team Lead here off its feed.
+    ...(homeRemotes && opts.homeRemotes
+      ? {
+          remoteBoards: {
+            views: () => homeRemotes.boards(),
+            originOf: (id: string) => opts.homeRemotes?.config.table.get(id),
+          },
+        }
       : {}),
   });
   const { leadPresence, readyNudger, stallNudger } = stallWiring;
@@ -2523,7 +2496,12 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     boardName: (id) => taskStore.getWorkspace(id)?.name,
     feed: async (id) => {
       const { items } = await crossReview.queue();
-      return homeFeedOf(id, taskStore.getWorkspace(id)?.name ?? id, items);
+      return homeFeedOf(
+        id,
+        taskStore.getWorkspace(id)?.name ?? id,
+        items,
+        stallWiring.deadBoard(id),
+      );
     },
     verifier: staticAccessVerifier,
     clientId: opts.homeFeedClientId,

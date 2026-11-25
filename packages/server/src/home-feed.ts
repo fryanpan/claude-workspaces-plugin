@@ -26,6 +26,7 @@ import { pageThreadHref } from '@claude-workspaces/core/page-thread-link';
 import { boardIdOfPath } from '../../../infra/board-router-worker/worker.js';
 import type { CrossReviewItem } from './cross-review-queue.ts';
 import { taskDeepLink } from './home-brief.ts';
+import { AGENT_ID_RE } from './identities.ts';
 
 export const HOME_FEED_VERSION = 1;
 
@@ -50,11 +51,26 @@ export interface HomeFeedRow {
   href?: string;
 }
 
+/**
+ * The board's own stall escalation, while nobody is on it
+ * (`stall-escalation.ts`): when its server first found it dead, how many
+ * tasks are stuck, and the agent id holding the lead seat. Numbers and one
+ * plain id only, so nothing a compromised remote writes here reaches Team
+ * Lead as words (`remote-escalations.ts` builds the frame from these).
+ */
+export interface HomeFeedEscalation {
+  deadSince: number;
+  stuck: number;
+  lead?: string;
+}
+
 export interface HomeFeed {
   v: typeof HOME_FEED_VERSION;
   boardId: string;
   boardName: string;
   rows: HomeFeedRow[];
+  /** Absent while somebody is on the board. Additive: an older Mac drops it. */
+  escalation?: HomeFeedEscalation;
 }
 
 /** The longest text each field keeps. Longer is refused, not clipped, so a
@@ -117,6 +133,31 @@ export interface ReadFeed {
   /** Rows kept with their link removed, because it pointed anywhere but
    *  this server's own boards. */
   linksRefused: number;
+  /** Present only when the remote sent one that passed `readEscalation`. */
+  escalation?: HomeFeedEscalation;
+}
+
+/** The most stuck tasks an escalation may claim; more is refused. */
+const MAX_STUCK = 10_000;
+
+/** The escalation, or undefined when it is absent or any number is bad. A
+ *  bad lead id is dropped alone: the board is still dead without it. */
+export function readEscalation(raw: unknown): HomeFeedEscalation | undefined {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const e = raw as Record<string, unknown>;
+  const deadSince = time(e.deadSince);
+  const stuck = e.stuck;
+  if (deadSince === null) return undefined;
+  if (typeof stuck !== 'number' || !Number.isInteger(stuck) || stuck < 1 || stuck > MAX_STUCK) {
+    return undefined;
+  }
+  // Any id the server accepts for an agent (`identities.ts`), minus the
+  // controls and bidi overrides no text field here may carry.
+  const lead =
+    typeof e.lead === 'string' && AGENT_ID_RE.test(e.lead) && !UNSAFE_TEXT.test(e.lead)
+      ? e.lead
+      : undefined;
+  return { deadSince, stuck, ...(lead !== undefined ? { lead } : {}) };
 }
 
 /**
@@ -155,7 +196,8 @@ export function readHomeFeed(
     else if ((entry as Record<string, unknown>).href !== undefined) linksRefused += 1;
     rows.push(row);
   }
-  return { boardName, rows, dropped, linksRefused };
+  const escalation = readEscalation(feed.escalation);
+  return { boardName, rows, dropped, linksRefused, ...(escalation ? { escalation } : {}) };
 }
 
 function readRow(entry: unknown): HomeFeedRow | null {
@@ -186,11 +228,13 @@ export function itemHref(item: CrossReviewItem): string {
   return pageThreadHref(`${board}/${surface}/${doc}`, item.threadId);
 }
 
-/** The remote side: one board's open items in the fixed schema, queue order. */
+/** The remote side: one board's open items in the fixed schema, queue order,
+ *  and its escalation while nobody is on it. */
 export function homeFeedOf(
   boardId: string,
   boardName: string,
   items: readonly CrossReviewItem[],
+  escalation?: HomeFeedEscalation,
 ): HomeFeed {
   const rows: HomeFeedRow[] = [];
   for (const item of items) {
@@ -206,5 +250,11 @@ export function homeFeedOf(
       href: itemHref(item),
     });
   }
-  return { v: HOME_FEED_VERSION, boardId, boardName: clip(boardName, LIMITS.boardName), rows };
+  return {
+    v: HOME_FEED_VERSION,
+    boardId,
+    boardName: clip(boardName, LIMITS.boardName),
+    rows,
+    ...(escalation ? { escalation } : {}),
+  };
 }

@@ -13,7 +13,7 @@
  * same fields and the server checks them the same way (`buildSpot`).
  */
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import type { PlaceFields } from '../../../server/src/index.ts';
+import type { PlaceFields } from '../../../server/src/routes/contracts.ts';
 import type { AgentAuthor } from '../author.ts';
 import { personClient } from '../server-client.ts';
 

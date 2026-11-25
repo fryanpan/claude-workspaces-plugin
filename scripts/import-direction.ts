@@ -19,6 +19,13 @@
  * `server.ts` is the one module allowed to import `routes/`, because it is the
  * router: that is what makes the direction a direction rather than a ban.
  *
+ * A third edge comes from outside the package. The MCP child reads the route
+ * contracts' TYPES, and it reads them through one door,
+ * `routes/contracts.ts`. They used to be re-exported from `server.ts` and
+ * again from `index.ts`, so adding a contract meant an export-only edit to the
+ * router, and 16 of its 97 commits were nothing else. Another package naming
+ * any other file under `routes/` is the drift that barrel exists to stop.
+ *
  * Type-only imports count. Both edges above were `import type`, and a rule
  * that ignored them would have caught neither.
  *
@@ -43,6 +50,9 @@ export const ROUTER = posix.join(SRC_ROOT, 'server.ts');
 /** The route directory, with its trailing separator so a prefix test cannot
  *  match a sibling named `routes-something.ts`. */
 export const ROUTES_DIR = `${posix.join(SRC_ROOT, 'routes')}/`;
+/** The one file under `routes/` another package may import: the typed route
+ *  contracts, as types. */
+export const CONTRACTS = `${ROUTES_DIR}contracts.ts`;
 
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.git']);
 
@@ -54,7 +64,7 @@ export interface Violation {
   to: string;
   /** The specifier as written, so the message names something greppable. */
   specifier: string;
-  rule: 'routes-imports-server' | 'non-route-imports-routes';
+  rule: 'routes-imports-server' | 'non-route-imports-routes' | 'package-imports-routes';
 }
 
 /** Normalise a path to forward slashes, so the checks read the same on
@@ -93,8 +103,16 @@ export function resolveSpecifier(fromRepoRel: string, specifier: string): string
 /** The edges one file's imports produce that break the direction. */
 export function violationsIn(fromRepoRel: string, source: string): Violation[] {
   const from = toPosix(fromRepoRel);
-  if (!from.startsWith(`${SRC_ROOT}/`)) return [];
   const found: Violation[] = [];
+  if (!from.startsWith(`${SRC_ROOT}/`)) {
+    for (const specifier of relativeSpecifiers(source)) {
+      const to = resolveSpecifier(from, specifier);
+      if (isRoute(to) && to !== CONTRACTS) {
+        found.push({ from, to, specifier, rule: 'package-imports-routes' });
+      }
+    }
+    return found;
+  }
   for (const specifier of relativeSpecifiers(source)) {
     const to = resolveSpecifier(from, specifier);
     if (isRoute(from) && to === ROUTER) {
@@ -119,15 +137,29 @@ export function walk(dir: string, root: string, out: string[] = []): string[] {
   return out;
 }
 
-export function audit(root: string): Violation[] {
-  const scanDir = join(root, ...SRC_ROOT.split('/'));
-  let files: string[];
+/** Every package's `src/`: the server's for the two inner edges, the rest
+ *  for the edge into `routes/` from outside. Tests are not read — a server
+ *  test drives a route module directly, and that is the point of it. */
+function sourceDirs(root: string): string[] {
+  const pkgs = join(root, 'packages');
   try {
-    if (!statSync(scanDir).isDirectory()) return [];
-    files = walk(scanDir, root);
+    return readdirSync(pkgs, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => join(pkgs, e.name, 'src'))
+      .filter((d) => {
+        try {
+          return statSync(d).isDirectory();
+        } catch {
+          return false;
+        }
+      });
   } catch {
     return [];
   }
+}
+
+export function audit(root: string): Violation[] {
+  const files = sourceDirs(root).flatMap((d) => walk(d, root));
   const found: Violation[] = [];
   for (const rel of files) {
     found.push(...violationsIn(rel, readFileSync(join(root, ...rel.split('/')), 'utf8')));
@@ -140,6 +172,8 @@ const EXPLAIN: Record<Violation['rule'], string> = {
     'a route may not import server.ts — server.ts imports routes/ back, so this is a cycle. Shared config types live in server-options.ts.',
   'non-route-imports-routes':
     'only server.ts may import out of routes/ — a service that needs a name a route also needs should own it, with the route context re-exporting it (see review-gate-types.ts).',
+  'package-imports-routes':
+    'another package reads routes/ only through routes/contracts.ts — add the type to that barrel and import it from there.',
 };
 
 function main(): number {
