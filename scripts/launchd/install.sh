@@ -46,6 +46,10 @@ LOG_DIR="${HOME}/Library/Logs"
 # put them in.
 # shellcheck source=scripts/launchd/bootstrap-retry.sh
 . "${SCRIPT_DIR}/bootstrap-retry.sh"
+# render_plist fills the template's placeholders. Its own file for the same
+# reason: a test renders the real template through it.
+# shellcheck source=scripts/launchd/render-plist.sh
+. "${SCRIPT_DIR}/render-plist.sh"
 
 # Resolve bun: prefer ~/.bun/bin/bun (the official installer's path), fall back
 # to PATH, fail loudly if neither works. launchd does NOT run login shells, so
@@ -215,29 +219,7 @@ fi
 
 mkdir -p "$(dirname "${PLIST_DEST}")" "${LOG_DIR}"
 
-# Substitute placeholders. Use a delimiter unlikely to appear in paths. The
-# first expression renames the template's label (and the log files named
-# after it) when CW_LAUNCHD_LABEL asked for another; with the default it
-# changes nothing. The label was validated above, so it carries no `|`.
-DEFAULT_LABEL_RE="${DEFAULT_LABEL//./\\.}"
-sed \
-    -e "s|${DEFAULT_LABEL_RE}|${LABEL}|g" \
-    -e "s|{{REPO_DIR}}|${REPO_DIR}|g" \
-    -e "s|{{BUN_BIN}}|${BUN_BIN}|g" \
-    -e "s|{{BUN_DIR}}|${BUN_DIR}|g" \
-    -e "s|{{HOME_DIR}}|${HOME}|g" \
-    -e "s|{{DATA_DIR}}|${DATA_DIR}|g" \
-    -e "s|{{LOG_DIR}}|${LOG_DIR}|g" \
-    -e "s|{{PUBLIC_BASE_URL}}|${PUBLIC_BASE_URL}|g" \
-    -e "s|{{REQUIRE_EMAIL_AUTH}}|${REQUIRE_EMAIL_AUTH}|g" \
-    -e "s|{{OWNER_EMAIL}}|${OWNER_EMAIL}|g" \
-    -e "s|{{SHARE_PUBLIC_HOSTNAME}}|${SHARE_PUBLIC_HOSTNAME}|g" \
-    -e "s|{{ACCESS_TUNNEL_HOSTS}}|${ACCESS_TUNNEL_HOSTS}|g" \
-    -e "s|{{PROXIED_TRUSTED_HOSTS}}|${PROXIED_TRUSTED_HOSTS}|g" \
-    -e "s|{{PROXIED_TRUSTED_EMAILS}}|${PROXIED_TRUSTED_EMAILS}|g" \
-    -e "s|{{ACCESS_TEAM_DOMAIN}}|${ACCESS_TEAM_DOMAIN}|g" \
-    -e "s|{{ACCESS_AUD}}|${ACCESS_AUD}|g" \
-    "${TEMPLATE}" > "${PLIST_DEST}"
+render_plist "${TEMPLATE}" "${DEFAULT_LABEL}" "${LABEL}" > "${PLIST_DEST}"
 
 if ! bootstrap_with_retry "${DOMAIN}" "${PLIST_DEST}"; then
     exit 3
