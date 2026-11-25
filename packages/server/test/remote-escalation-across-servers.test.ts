@@ -13,7 +13,9 @@
  * naming the seat and the origin, and tells the project server Team Lead has
  * it, so the project server files NO item for the owner; a board there that
  * no Mac follows still files at once; and the feed stops carrying the
- * escalation once the lead is back.
+ * escalation once the lead is back. Team Lead's own read of the remote
+ * boards (`GET /api/home-remotes` on the Mac) carries the lead's status from
+ * the project server: not live while it is dead, live once it is back.
  *
  * All fixtures are synthetic — invented names. The repo is public.
  */
@@ -110,6 +112,11 @@ describe('a dead board on another server reaches Team Lead on the Mac', () => {
     streams.push(s);
     return s;
   };
+  type RemoteRow = { boardId: string; reached: boolean; lead?: Record<string, unknown> };
+  const macLead = async () =>
+    (await call<{ boards: RemoteRow[] }>(mac, '/api/home-remotes')).boards.find(
+      (b) => b.boardId === board,
+    )?.lead;
   const cloudFeed = () =>
     call<{ escalation?: Record<string, unknown> }>(cloud, `/workspaces/${board}/home-feed`);
 
@@ -242,6 +249,8 @@ describe('a dead board on another server reaches Team Lead on the Mac', () => {
     mac.nudgeStalls();
     mac.nudgeStalls();
     expect(teamLead.list.filter((f) => f.event === STALL_EVENT)).toHaveLength(1);
+    // Team Lead reads the lead's status from here, without the board.
+    expect(await macLead()).toMatchObject({ agentId: LEAD.id, live: false });
   });
 
   it('the feed stops carrying it once the lead is back, with no item left to withdraw', async () => {
@@ -255,5 +264,10 @@ describe('a dead board on another server reaches Team Lead on the Mac', () => {
       cloud.nudgeStalls();
       return (await cloudFeed()).escalation === undefined;
     });
+    const lead = await waitFor(async () => {
+      const l = await macLead();
+      return l?.live === true ? l : undefined;
+    });
+    expect(lead.lastSeenAt).toBeGreaterThan(0);
   });
 });

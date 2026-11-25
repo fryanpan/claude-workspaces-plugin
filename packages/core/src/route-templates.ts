@@ -64,6 +64,7 @@ const FROM_ROUTE_TABLE: readonly (readonly string[])[] = [
   ['api', 'docs'],
   ['api', 'github-push-keys'],
   ['api', 'goals'],
+  ['api', 'home-remotes'],
   ['api', 'load-reports'],
   ['api', 'load-reports', 'slowest'],
   ['api', 'me', 'messages'],

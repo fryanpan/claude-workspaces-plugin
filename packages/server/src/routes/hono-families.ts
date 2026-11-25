@@ -74,6 +74,7 @@ import { type McpConnectorRouteContext, handleMcpConnectorRoute } from './mcp-co
 import { type MountRoutesContext, handleMountRoutes } from './mounts.ts';
 import {
   type OpsRoutesContext,
+  handleHomeRemotesRoute,
   handleOpsMetricsRoute,
   handleOpsRoutes,
   handleSummaryBackfillRoute,
@@ -287,6 +288,7 @@ export function honoFamilies(ctx: HonoFamiliesContext): HonoFamily[] {
         async (v) =>
           (await handleSummaryBackfillRoute(ctx.opsRoutesCtx, v)) ??
           handleOpsMetricsRoute(ctx.opsRoutesCtx, v) ??
+          handleHomeRemotesRoute(ctx.opsRoutesCtx, v) ??
           (await handleOpsRoutes(ctx.opsRoutesCtx, v)) ??
           handleWebhookLogRoute(ctx.opsRoutesCtx, v),
       ),

@@ -160,6 +160,7 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
 
   ...family('routes/ops.ts', [
     ['trusted-local', '/api/metrics', 'GET'],
+    ['trusted-local', '/api/home-remotes', 'GET'],
     ['trusted-local', '/api/summaries/backfill', 'POST'],
     ['trusted-local', '/api/webhooks/log', 'GET POST'],
     ['trusted-local', '/api/plugin/refresh', 'GET'],

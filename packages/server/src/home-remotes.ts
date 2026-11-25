@@ -39,7 +39,12 @@
  */
 import { readFileSync, statSync } from 'node:fs';
 import { parseBoardOrigins } from '../../../infra/board-router-worker/worker.js';
-import { type HomeFeedEscalation, type HomeFeedRow, readHomeFeed } from './home-feed.ts';
+import {
+  type HomeFeedEscalation,
+  type HomeFeedLead,
+  type HomeFeedRow,
+  readHomeFeed,
+} from './home-feed.ts';
 import { BOARD_TOKEN, createHomeRemoteTokens } from './home-remote-tokens.ts';
 import { configuredHostFetch } from './outbound-fetch.ts';
 
@@ -80,6 +85,8 @@ export interface RemoteBoardView {
   /** The board's stall escalation as its server last reported it: present
    *  while nobody is on the board there (`remote-escalations.ts`). */
   escalation?: HomeFeedEscalation;
+  /** The board's lead as its server last reported it (`lead-status.ts`). */
+  lead?: HomeFeedLead;
 }
 
 const TOKEN_PART = /^[A-Za-z0-9._-]{1,256}$/;

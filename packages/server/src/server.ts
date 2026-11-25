@@ -114,6 +114,7 @@ import { LeadChatMeetings } from './lead-chat/meeting.ts';
 import { LeadSessionMirror } from './lead-chat/mirror.ts';
 import { LeadPane } from './lead-chat/pane.ts';
 import { wireLeadRanks } from './lead-rank-wiring.ts';
+import { leadStatusOf } from './lead-status.ts';
 import { createMarkdownLister, projectRepoKey } from './library.ts';
 import { describeLiveness } from './liveness.ts';
 import { type LookupDoc, boardLookupDocs } from './meeting-lookup.ts';
@@ -2508,6 +2509,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         taskStore.getWorkspace(id)?.name ?? id,
         items,
         stallWiring.deadBoard(id),
+        leadStatusOf(taskStore, id),
       );
     },
     verifier: staticAccessVerifier,
@@ -2638,6 +2640,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
       const now = Date.now();
       return blockingWait(crossReview.ledger.read(now - BLOCKING_WAIT_WINDOW_MS), now);
     },
+    remoteBoards: () => (homeRemotes ? homeRemotes.boards() : null),
     // The OTHER claim `GET /api/deploy` answers: not "did the last deploy
     // come up" but "is this process bound and discoverable, now". Both halves
     // are read per request — `Bun.serve` has not returned when this object is
