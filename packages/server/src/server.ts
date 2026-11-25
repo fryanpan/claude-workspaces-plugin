@@ -120,7 +120,7 @@ import { describeLiveness } from './liveness.ts';
 import { type LookupDoc, boardLookupDocs } from './meeting-lookup.ts';
 import { retitleClockTitlesAtBoot } from './meeting-titler.ts';
 import { wireMeetings } from './meeting-wiring.ts';
-import { isLoopbackAddress, normalizeHost } from './middleware/host-guard.ts';
+import { isLoopbackAddress } from './middleware/host-guard.ts';
 import { loopbackUidDoor } from './middleware/loopback-uid-door.ts';
 import { isBrowserRequest } from './middleware/write-gate.ts';
 import { boardLinkedItems } from './mockup-linked-items.ts';
@@ -506,6 +506,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     recallCallbackHost,
     boardSignIn,
     signInDoor,
+    signInAgainPath,
     ownerSignIn,
   } = createAccessDeps({
     dataDir,
@@ -3399,12 +3400,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     requireEmailAuth,
     requireSignInToWrite,
     emailCodeSignIn,
-    // Only on the sign-in's own Host, as the sign-in door reads its cookie.
-    signInAgainPath: async (req, next) => {
-      const signIn = boardSignIn?.signInAgainPath ? boardSignIn : null;
-      if (!signIn || normalizeHost(req.headers.get('host')) !== signIn.host) return null;
-      return (await signIn.signInAgainPath?.(req, next)) ?? null;
-    },
+    signInAgainPath,
     defaultBoardWorkspaceName: DEFAULT_BOARD_WORKSPACE_NAME,
     // The operator allowlist doubles as the audience a `share_link` with no
     // `allowDomains` admits. Same list, same source; see the field's doc.

@@ -42,7 +42,7 @@ afterEach(() => {
   for (const f of cleanups.splice(0)) f();
 });
 
-function mountPanel() {
+function mountPanel(extra: { watchRole?: boolean } = {}) {
   const container = document.createElement('div');
   document.body.appendChild(container);
   cleanups.push(() => container.remove());
@@ -54,6 +54,7 @@ function mountPanel() {
     onResolve: () => {},
     onReopen: () => {},
     onReanchor: () => {},
+    ...extra,
   });
   return { panel, container };
 }
@@ -95,7 +96,8 @@ describe('thread panel empty state — an unsynced doc is not an empty doc', () 
   it('redraws the empty state when the role arrives after the first sync', async () => {
     // The access frame can land in the same batch as the sync, after the text
     // was drawn; nothing else redraws an empty list.
-    const { panel, container } = mountPanel();
+    const { panel, container } = mountPanel({ watchRole: true });
+    cleanups.push(() => panel.dispose());
     panel.setThreads([]);
     panel.markSynced();
     expect(bodyText(container)).toContain('leave one');
@@ -138,5 +140,18 @@ describe('thread panel empty state — an unsynced doc is not an empty doc', () 
 
     expect(bodyText(container)).toContain('No open comments');
     expect(bodyText(container)).not.toContain('Loading');
+  });
+
+  it('a panel that does not watch the role, or was disposed, leaves no observer redrawing it', async () => {
+    for (const watchRole of [false, true]) {
+      const { panel, container } = mountPanel({ watchRole });
+      panel.setThreads([]);
+      panel.markSynced();
+      if (watchRole) panel.dispose();
+      document.body.classList.add('role-view');
+      await Promise.resolve();
+      expect(bodyText(container)).toContain('leave one');
+      document.body.classList.remove('role-view');
+    }
   });
 });

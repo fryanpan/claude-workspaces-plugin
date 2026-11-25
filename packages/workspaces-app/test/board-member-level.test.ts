@@ -206,6 +206,16 @@ describe('a level per person and per domain', () => {
     expect(rowOf(m.list, BOB).querySelector('select')).toBeNull();
   });
 
+  it('gives the selects back when the write throws', async () => {
+    const m = mount({ setRole: () => Promise.reject(new Error('network down')) });
+    await m.handle.refresh();
+    pick(selectOf(m.list, BOB), 'comment');
+    await m.handle.settled();
+    expect(selectOf(m.list, BOB).disabled).toBe(false);
+    expect(selectOf(m.list, BOB).value).toBe('view');
+    expect(m.toasts.at(-1)).toBe(`Could not change what ${BOB} can do`);
+  });
+
   it('sends one level at a time when the select fires twice', async () => {
     let release: () => void = () => {};
     const m = mount({

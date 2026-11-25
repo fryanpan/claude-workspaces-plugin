@@ -143,6 +143,12 @@ describe('countedActionOf', () => {
     // `member` is the old spelling of edit.
     expect(await action('POST', path, { role: 'member' }, lookup)).toBe('raise-role');
     expect(seen[0]).toEqual(['w-1', 'a@b.test', 'view']);
+    // Both segments decoded, and a trailing slash read as the routers read it.
+    seen.length = 0;
+    expect(
+      await action('POST', '/workspaces/w%2D1/members/A%40B.test/role/', { role: 'view' }, lookup),
+    ).toBeNull();
+    expect(seen[0]).toEqual(['w-1', 'A@B.test', 'view']);
     // A role the route refuses, or no lookup at all, is counted.
     expect(await action('POST', path, { role: 'boss' }, lookup)).toBe('raise-role');
     expect(await action('POST', path, { role: 'view' })).toBe('raise-role');

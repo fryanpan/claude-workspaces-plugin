@@ -125,4 +125,23 @@ describe('a domain entry’s level', () => {
     expect(links.raisesAccess(BOARD, '@saltmarsh.example', 'view')).toBe(true);
     expect(links.raisesAccess(BOARD, 'nobody@saltmarsh.example', 'view')).toBe(true);
   });
+
+  // The fresh sign-in check asks this before any route has said who may ask,
+  // so it must never write: a row for an address nobody signed in with would
+  // list them as in, for anyone who can send the request.
+  it('answers whether a change raises anyone without writing a member row', () => {
+    const PENDING = 'riverbend@saltmarsh.example';
+    links.addToAudience(BOARD, [PENDING], 'Alice');
+    const before = links.membersOf(BOARD).map((m) => m.email);
+    // Admitted by the domain but never signed in: no row and no entry of
+    // their own, so nothing to look up, and the route answers 404.
+    expect(links.raisesAccess(BOARD, LATE, 'view')).toBe(true);
+    expect(links.raisesAccess(BOARD, PENDING, 'edit')).toBe(false);
+    expect(links.raisesAccess(BOARD, PENDING, 'owner')).toBe(true);
+    expect(links.heldAccessOf(BOARD, PENDING)).toBeNull();
+    expect(links.membersOf(BOARD).map((m) => m.email)).toEqual(before);
+    // Positive control: the gate's own question does write the row.
+    expect(links.isMember(BOARD, PENDING)).toBe(true);
+    expect(links.heldAccessOf(BOARD, PENDING)).toEqual({ seat: 'member', access: 'edit' });
+  });
 });

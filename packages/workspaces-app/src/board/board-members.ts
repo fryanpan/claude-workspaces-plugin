@@ -226,7 +226,7 @@ export function mountBoardMembers(deps: BoardMembersDeps): BoardMembersHandle {
     const who = isDomain(match) ? `Everyone at ${match}` : match;
     const before = row.level ?? 'edit';
     run(async () => {
-      const res = await setRole(match, next);
+      const res: AccessWriteResult = await setRole(match, next).catch(() => ({ ok: false }));
       promoting = null;
       focusAfter = row.key;
       focusLevel = true;

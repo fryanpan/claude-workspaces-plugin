@@ -270,11 +270,14 @@ export function createAccessDeps(ctx: AccessDepsContext) {
     },
     ownerSignedIn: () => ownerSignIn.read() !== null,
   });
-  const staticAccessVerifier = signInDoor.verifier(
+  const accessOnly =
     opts.cfAccess && typeof opts.cfAccess.audience === 'string'
       ? createCfAccessVerifier(opts.cfAccess)
-      : null,
-  );
+      : null;
+  const staticAccessVerifier = signInDoor.verifier(accessOnly);
+  /** "Sign in again"'s Google branch, asked in the verifier's own order. */
+  const signInAgainPath = (req: Request, next: string): Promise<string | null> =>
+    signInDoor.signInAgainPath(req, next, accessOnly);
   const accessTunnelHosts = opts.accessTunnelHosts ?? [];
   const collabAccessVerifier = accessTunnelHosts.length > 0 ? staticAccessVerifier : null;
   /**
@@ -328,6 +331,7 @@ export function createAccessDeps(ctx: AccessDepsContext) {
     recallCallbackHost,
     boardSignIn,
     signInDoor,
+    signInAgainPath,
     ownerSignIn,
   };
 }

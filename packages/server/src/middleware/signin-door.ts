@@ -115,6 +115,18 @@ export interface SignInDoor {
    * anything that is not a page load, which keeps its 401.
    */
   redirectFor(req: Request, pathname: string, isPage: boolean): Response | null;
+  /**
+   * Where "Sign in again" (`routes/auth-share.ts`) sends a person whose proof
+   * is a session here: through the sign-in page, so a new session carries a
+   * new time. Null when their proof is something else, read in the order the
+   * verifier reads it: in `both`, a stamp that verifies proves them first, so
+   * it is the stamp that has to be renewed.
+   */
+  signInAgainPath(
+    req: Request,
+    next: string,
+    access: CfAccessVerifier | null,
+  ): Promise<string | null>;
 }
 
 const unverified: CfAccessResult = { ok: false, status: 401, error: 'signin_unverified' };
@@ -171,8 +183,19 @@ export function createSignInDoor(opts: SignInDoorOptions): SignInDoor {
     return redirect(308, `${signIn.origin}${pathname}${search}`);
   };
 
+  const signInAgainPath = async (
+    req: Request,
+    next: string,
+    access: CfAccessVerifier | null,
+  ): Promise<string | null> => {
+    if (!active || !signIn?.signInAgainPath) return null;
+    if (normalizeHost(req.headers.get('host')) !== signIn.host) return null;
+    if (effectiveMode() !== 'better-auth' && access && (await access(req)).ok) return null;
+    return signIn.signInAgainPath(req, next);
+  };
+
   const localHost = active && signIn?.localOnly ? signIn.host : null;
-  return { mode, localHost, effectiveMode, verifier, claim, redirectFor };
+  return { mode, localHost, effectiveMode, verifier, claim, redirectFor, signInAgainPath };
 }
 
 function redirect(status: number, location: string): Response {

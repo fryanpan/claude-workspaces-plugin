@@ -159,7 +159,8 @@ async function raisesRole(
   const role = parseAccessRole((await bodyOf(req))?.role);
   const parts = trimTrailingSlashes(pathname).split('/');
   if (!role || !raisesAccess) return true;
-  return raisesAccess(parts[2] ?? '', safeDecodeSegment(parts[4] ?? ''), role);
+  // Decoded as the route decodes both segments, so the two look up one board.
+  return raisesAccess(safeDecodeSegment(parts[2] ?? ''), safeDecodeSegment(parts[4] ?? ''), role);
 }
 
 const isEmptyArray = (v: unknown): boolean => Array.isArray(v) && v.length === 0;

@@ -156,7 +156,10 @@ export async function handleWorkspaceMembers(
     if (!accessRole) {
       return j(400, { error: "role must be 'owner', 'edit', 'comment' or 'view'" });
     }
-    const before = email.startsWith('@') ? null : shareLinks.roleOf(workspaceId, email);
+    // Read-only: an address nobody has signed in with holds no row yet, and
+    // this must not write one (`ShareLinks.heldAccessOf`).
+    const held = email.startsWith('@') ? null : shareLinks.heldAccessOf(workspaceId, email);
+    const before = held?.seat ?? null;
     // An audience entry with no member row: an `@domain` (one level for
     // everyone it lets in), or an address nobody has signed in with yet (the
     // level they arrive at). Neither is a seat, so neither can be Owner.
@@ -187,7 +190,7 @@ export async function handleWorkspaceMembers(
       return j(200, { ok: true, workspaceId, match: email, accessRole, ...hangUp(moved) });
     }
     const { seat: role, access } = seatAndAccess(accessRole);
-    const accessBefore = shareLinks.accessRoleOf(workspaceId, email);
+    const accessBefore = held?.access ?? null;
     // A promotion by anything but the owner's own browser is a proposal.
     if (role === 'owner' && before !== 'owner' && !proven()) {
       const change = {

@@ -546,8 +546,8 @@ export class ShareLinks {
    * for anything the board does not hold, which the route answers itself.
    */
   raisesAccess(workspaceId: string, match: string, role: AccessRole): boolean {
-    const person = match.startsWith('@') ? null : this.accessRoleOf(workspaceId, match);
-    if (person !== null) return widensAccess(person, role);
+    const held = match.startsWith('@') ? null : this.heldAccessOf(workspaceId, match);
+    if (held !== null) return widensAccess(held.access, role);
     const entryLevel = this.audienceAccessOf(workspaceId, match);
     if (entryLevel === null || role === 'owner') return true;
     if (widensAccess(entryLevel, role)) return true;
@@ -620,6 +620,25 @@ export class ShareLinks {
     this.members = this.members.map((m) => (m === row ? next : m));
     this.save();
     return true;
+  }
+
+  /**
+   * The seat and level of a member row that already exists, or null. Unlike
+   * `roleOf` it never writes a row for an address only the audience names:
+   * it is asked before a route has decided the caller may ask
+   * (`fresh-signin.ts`), and by the role route, where an address nobody has
+   * signed in with is an audience entry, not a member.
+   */
+  heldAccessOf(
+    workspaceId: string,
+    email: string | null | undefined,
+  ): { seat: BoardRole; access: AccessRole } | null {
+    const who = email ? normalizeEmail(email) : '';
+    if (who === '' || !workspaceId) return null;
+    const row = this.admittedRow(workspaceId, who);
+    if (!row) return null;
+    const seat = row.role ?? DEFAULT_BOARD_ROLE;
+    return { seat, access: accessRoleOf(seat, row.access) };
   }
 
   /** The four-word role (`board-access.ts`), or null when not a member. */

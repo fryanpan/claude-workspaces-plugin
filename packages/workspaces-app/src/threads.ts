@@ -27,6 +27,12 @@ export type ThreadTab = 'open' | 'resolved' | 'all';
 export interface ThreadPanelOpts {
   container: HTMLElement;
   currentUser: User;
+  /**
+   * Redraw when the body's `role-view` class changes (`doc-gates.ts`): the
+   * doc page's one long-lived panel only. A panel built per card would leave
+   * an observer behind for every rebuild.
+   */
+  watchRole?: boolean;
   onThreadClick: (threadId: string) => void;
   /**
    * `answersCommentId` is set when this reply ANSWERS a review item declared
@@ -132,15 +138,21 @@ export class ThreadPanel {
   /** Hash of what we last rendered. Skip re-render when nothing display-relevant changed. */
   private lastRenderKey = '';
 
+  private roleWatch: MutationObserver | null = null;
+
   constructor(private opts: ThreadPanelOpts) {
-    // The empty state's words depend on the reader's role (`role-view`, set
-    // by `doc-gates.ts`), which can arrive after the list was drawn. The
-    // render is memoized on a key that includes it, so a class change that
-    // is not the role redraws nothing.
-    new MutationObserver(() => this.render()).observe(document.body, {
-      attributes: true,
-      attributeFilter: ['class'],
-    });
+    // The empty state's words depend on the reader's role, which can arrive
+    // after the list was drawn. The render is memoized on a key that includes
+    // it, so a class change that is not the role redraws nothing.
+    if (!opts.watchRole) return;
+    this.roleWatch = new MutationObserver(() => this.render());
+    this.roleWatch.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+  }
+
+  /** Stop watching the role; the page drops the panel after this. */
+  dispose(): void {
+    this.roleWatch?.disconnect();
+    this.roleWatch = null;
   }
 
   /** The first sync landed — from here on, an empty list really is empty. */
