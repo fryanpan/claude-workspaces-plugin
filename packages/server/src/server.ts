@@ -212,7 +212,7 @@ import { type VoiceApiRoutesContext } from './routes/voice-api.ts';
 import { type VoicePageRoutesContext } from './routes/voice-page.ts';
 import { type LibraryRoutesContext, libraryRunOutputSource } from './routes/workspace-library.ts';
 import { type MeetingHomeResolution, type WorkspaceRoutesContext } from './routes/workspaces.ts';
-import { applySeedBoard, seedBoardMarker } from './seed-board.ts';
+import { SEED_ACTOR, applySeedBoard, seedBoardMarker } from './seed-board.ts';
 import { captureServerError, captureServerWarning } from './sentry.ts';
 import type { ServerOptions } from './server-options.ts';
 import { AccessProposals } from './share/access-proposals.ts';
@@ -1120,11 +1120,15 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
         listWorkspaces: () => taskStore.listWorkspaces(),
         createWorkspace: (name) => taskStore.createWorkspace(name),
         ensureWorkspace: (id) => taskProjection.ensureWorkspace(id),
+        renameWorkspace: (id, name) => {
+          const r = taskStore.renameWorkspace(id, name, { actor: SEED_ACTOR });
+          if (!r.ok) throw new Error(`rename refused: ${r.error}`);
+        },
         shareLinks,
         marker: seedBoardMarker(dataDir),
       });
       console.log(
-        `[feedback] seed board ${seeded.workspaceId}: ${seeded.created ? 'created' : 'present'}, ${seeded.added.length} address(es) added`,
+        `[feedback] seed board ${seeded.workspaceId}: ${seeded.created ? 'created' : seeded.renamed ? 'renamed' : 'present'}, ${seeded.added.length} address(es) added`,
       );
       if (seeded.notOurs.length > 0) {
         console.warn(
