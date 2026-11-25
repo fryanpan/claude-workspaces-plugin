@@ -39,9 +39,17 @@ function supervisor(env: Record<string, string>) {
     date: `if [ "$1" = +%s ]; then cat "$CLOCK"; else exec /bin/date "$@"; fi`,
     bun: `case "$*" in *lead-restart.ts*)
   echo "$CW_LEAD_INBOX_DOC $CW_RELAY_AGENT_ID" >> "$LOG/.checks"
+  [ -e "$LOG/.hang" ] && exec /bin/sleep 1000
   if [ -e "$LOG/.restart" ]; then /bin/rm "$LOG/.restart"; echo restart; fi;;
 esac
 exit 0`,
+    // coreutils timeout, as far as lead.sh uses it, on the real clock.
+    timeout: `t=$1; shift
+"$@" & p=$!
+( /bin/sleep "$t"; kill "$p" 2>/dev/null ) </dev/null >/dev/null 2>&1 & w=$!
+wait "$p"; s=$?
+kill "$w" 2>/dev/null
+exit $s`,
   });
   const clock = join(s.log, '.clock');
   writeFileSync(clock, '1000000\n');
@@ -95,6 +103,23 @@ describe.skipIf(BASH === null)('the supervisor and a requested restart', () => {
     expect(text).toContain('session ended for a requested restart; starting it again');
     // No backoff wait: a restart is not a quick end.
     expect(text).not.toMatch(/starting it again in \d+s/);
+  }, 30_000);
+
+  it('a check that hangs is cut off, so a session that ended is started again', async () => {
+    const sup = supervisor({ ...RELAY, CW_LEAD_RESTART_CHECK_TIMEOUT: '1' });
+    writeFileSync(join(sup.log, '.hang'), '');
+    await waitFor(() => sup.pids().length === 1, { timeout: 10_000, describe: 'the session' });
+    // The supervisor is now inside a check that never answers.
+    await waitFor(() => lines(sup.log, '.checks').length >= 1, {
+      timeout: 10_000,
+      describe: 'a hung check',
+    });
+    process.kill(sup.pids()[0] as number, 'SIGKILL');
+    await waitFor(() => sup.pids().length === 2, {
+      timeout: 10_000,
+      describe: 'a second session after the session ended',
+    });
+    expect(sup.out.join('')).not.toContain('restart requested through the relay');
   }, 30_000);
 
   it('never runs the check without the relay settings', async () => {

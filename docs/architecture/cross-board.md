@@ -140,14 +140,20 @@ field naming the origin. The board announces a Home change whenever the
 escalation its feed reports appears or goes, so the Mac re-reads it then. It
 rides the existing pull; nothing new calls the Mac. Once Team Lead has been
 told, the Mac says so to the board's server (`POST
-/workspaces/<board>/home-feed/escalation-ack`, the feed's own gate, body
-`{deadSince}`), and repeats it every five minutes while Team Lead stays
+/workspaces/<board>/home-feed/escalation-ack`, body `{deadSince}`), and
+repeats it every five minutes while Team Lead stays
 reachable. The board then files nothing for its owner for fifteen minutes
 from the last word, and withdraws an item it had filed. A board whose feed a
 Mac follows (`home-feed-followers.ts`: a stream open, or a read in the last
 fifteen minutes) waits five minutes for that word before it files; a board
 no Mac follows files at once, as before. If the Mac cannot be told, or Team
-Lead is unreachable there, no word comes and the board files.
+Lead is unreachable there, no word comes and the board files. Only the Mac
+may send the word: it must come through the tunnel with the feed's service
+token or, with no Access in front, an `at2` for that board minted for Team
+Lead (`spawnerAgentId`). A loopback caller, which may read the feed, is
+refused, and so is the board's own lead with its `at2`. So the Mac's
+`boardTokens` entry for a board on a server without Access must be minted
+for Team Lead's agent id, or the board files as before.
 
 The feed also carries the board's lead (`lead-status.ts`): its agent id,
 whether its session can be reached, and when it last sent a heartbeat and

@@ -2517,6 +2517,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     peerAddress: (req) => server.requestIP(req)?.address ?? undefined,
     // `at2` only: a board-scoped token for the board the feed path names.
     boardGrantFor: (bearer) => (bearer.startsWith('at2.') ? boardAgentTokens.verify(bearer) : null),
+    teamLeadAgentId: () => spawnerAgentId,
     accessInFront: () => signInDoor.effectiveMode() !== 'better-auth',
     // These families answer above admission, so they ask the master switch
     // themselves (`refuseWhileExternalAccessOff`, routes/home-feed.ts).

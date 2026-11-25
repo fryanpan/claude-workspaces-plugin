@@ -21,8 +21,10 @@
 # Team Lead can restart the session through the org relay: every 30s the
 # supervisor runs lead-restart.ts, which prints `restart` only for a request
 # the relay's own board token delivered onto this lead's inbox doc, naming
-# this lead (CW_LEAD_INBOX_DOC and CW_RELAY_AGENT_ID, set when the relay is
-# installed; without them nothing is checked). The supervisor then ends the
+# this lead (CW_LEAD_INBOX_DOC and CW_RELAY_AGENT_ID: Fly secrets, which
+# whoever installs the relay sets by hand; without them nothing is checked).
+# The check is cut off after RESTART_CHECK_TIMEOUT seconds, so a board server
+# that hangs cannot stop the supervisor watching the session. It then ends the
 # session and starts it again at once, with `--continue`, and the restart
 # does not count as a quick end. Attach to it with (env -i, so root's secrets
 # stay root's):
@@ -41,6 +43,8 @@ GIVE_UP_AFTER=6
 SLOW_RETRY=600
 # Polls between two restart checks: 6 x 5s.
 RESTART_EVERY=6
+# Seconds; the test suite shortens it, which nothing on the machine does.
+RESTART_CHECK_TIMEOUT="${CW_LEAD_RESTART_CHECK_TIMEOUT:-20}"
 
 log() { echo "[lead] $(date -u +%FT%TZ) $*"; }
 # In the background, so a TERM is handled at once rather than after the sleep.
@@ -97,7 +101,7 @@ deploy_key() {
 # Its errors go to this log; a failed check is never a restart.
 restart_requested() {
   [ -n "${CW_LEAD_INBOX_DOC:-}" ] && [ -n "${CW_RELAY_AGENT_ID:-}" ] || return 1
-  [ "$(bun "$APP/infra/project-machine/lead-restart.ts")" = restart ]
+  [ "$(timeout "$RESTART_CHECK_TIMEOUT" bun "$APP/infra/project-machine/lead-restart.ts")" = restart ]
 }
 
 session() {

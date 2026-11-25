@@ -186,11 +186,13 @@ describe('Home on the Mac shows the project server’s review items', () => {
     const headers = new Headers(request.headers);
     headers.set('host', url.host);
     headers.set('cf-ray', '8a1b2c3d4e5f-SJC');
+    const hasBody = request.method !== 'GET' && request.method !== 'HEAD';
     return fetch(`http://127.0.0.1:${cloud.port}${url.pathname}${url.search}`, {
       method: request.method,
       headers,
       redirect: 'manual',
       signal: request.signal,
+      ...(hasBody ? { body: await request.arrayBuffer() } : {}),
     });
   };
 
@@ -216,9 +218,18 @@ describe('Home on the Mac shows the project server’s review items', () => {
   };
 
   /** A request through the tunnel straight to the project server. */
-  const viaTunnel = (path: string, headers: Record<string, string> = {}, method = 'GET') =>
+  const viaTunnel = (
+    path: string,
+    headers: Record<string, string> = {},
+    method = 'GET',
+    body?: string,
+  ) =>
     handleBoardRequest(
-      new Request(`https://${ONE_HOST}${path}`, { method, headers }),
+      new Request(`https://${ONE_HOST}${path}`, {
+        method,
+        headers,
+        ...(body !== undefined ? { body } : {}),
+      }),
       { BOARD_ORIGINS: table },
       tunnel,
     );
@@ -437,32 +448,38 @@ describe('Home on the Mac shows the project server’s review items', () => {
       await stream.body?.cancel();
     });
 
-    it('takes Team Lead’s word only from the feed’s own callers, and checks it', async () => {
+    it('takes Team Lead’s word only from the Mac’s service token, and checks it', async () => {
       const ack = `${path()}/escalation-ack`;
-      const send = (body: string) =>
-        local(cloud, ack, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body,
-        });
+      const stamp = await sign({ common_name: tokens[CLOUD_ORIGIN].clientId });
+      const send = (body: string, method = 'POST') =>
+        viaTunnel(
+          ack,
+          { 'content-type': 'application/json', 'cf-access-jwt-assertion': stamp },
+          method,
+          method === 'POST' ? body : undefined,
+        );
+      const good = JSON.stringify({ deadSince: Date.now() });
+      // POSITIVE CONTROL for the refusals: the Mac's own token is answered.
+      expect((await send(good)).status).toBe(200);
+      // A loopback caller, which may READ the feed, may not send the word:
+      // that would let the dead board's own machine keep its owner's item off.
+      expect((await local(cloud, path())).status).toBe(200);
+      const fromHere = await local(cloud, ack, { method: 'POST', body: good });
+      expect(fromHere.status).toBe(403);
       // The tunnel with no stamp, or a person's, is refused before the body.
-      expect((await viaTunnel(ack, {}, 'POST')).status).toBe(403);
+      expect((await viaTunnel(ack, {}, 'POST', good)).status).toBe(403);
       const person = await sign({ email: 'member-1', common_name: tokens[CLOUD_ORIGIN].clientId });
-      expect((await viaTunnel(ack, { 'cf-access-jwt-assertion': person }, 'POST')).status).toBe(
-        403,
-      );
+      expect(
+        (await viaTunnel(ack, { 'cf-access-jwt-assertion': person }, 'POST', good)).status,
+      ).toBe(403);
       expect((await send('not json')).status).toBe(400);
       expect((await send('{"deadSince":"soon"}')).status).toBe(400);
       expect((await send(JSON.stringify({ deadSince: 1, pad: 'x'.repeat(300) }))).status).toBe(413);
-      expect((await local(cloud, ack)).status).toBe(405);
+      expect((await send('', 'GET')).status).toBe(405);
       // A board that is not dead takes nothing.
-      const res = await send(JSON.stringify({ deadSince: Date.now() }));
+      const res = await send(good);
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ held: false });
-      const unheld = '/workspaces/w-unheld/home-feed/escalation-ack';
-      expect((await local(cloud, unheld, { method: 'POST', body: '{"deadSince":1}' })).status).toBe(
-        404,
-      );
     });
   });
 });

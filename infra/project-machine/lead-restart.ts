@@ -35,6 +35,9 @@ import { agentIdForName } from '../../packages/core/src/identity.ts';
 import { RESTART_HEADER } from '../../packages/server/src/org-relay/relay-kinds.ts';
 
 /** A request older than this is recorded and not acted on. */
+/** How long one call to the board server may take. */
+const FETCH_TIMEOUT_MS = 10_000;
+
 export const RESTART_MAX_AGE_MS = 10 * 60_000;
 /** The most handled ids kept; the oldest go first. */
 const MAX_HANDLED = 500;
@@ -181,8 +184,14 @@ if (import.meta.main) {
   }
   try {
     const out = await checkOnce({
+      // Each call is cut off, so a hung board server ends the check rather
+      // than holding it; lead.sh bounds the whole run as well.
       fetch: (path, init) =>
-        fetch(`http://localhost${path}`, { ...init, unix: socket } as RequestInit),
+        fetch(`http://localhost${path}`, {
+          ...init,
+          unix: socket,
+          signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        } as RequestInit),
       boardId,
       inboxDoc,
       relayAgentId,

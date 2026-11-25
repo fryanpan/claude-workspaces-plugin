@@ -27,6 +27,7 @@ import {
 import { REMOTE_ACK_GRACE_MS, REMOTE_HOLD_MS, StallEscalations } from '../src/stall-escalation.ts';
 import type { StallSnapshot } from '../src/stall-nudge.ts';
 import { type Task, TaskStore } from '../src/tasks.ts';
+import { waitFor } from './wait-for.ts';
 
 const AGENT = { id: 'agent-tide-runner', name: 'Tide Runner', kind: 'agent' };
 const ESCALATE_MS = 60 * 60_000;
@@ -118,6 +119,25 @@ describe('the board’s side: Team Lead elsewhere holds it', () => {
     expect(store.listReviewItems(task.id)[0]?.review.withdrawnAt).toBeDefined();
   });
 
+  it('does not ask again, after the hold, about rows a person already answered', () => {
+    followed = false;
+    const e = build();
+    e.onBoard(dead(), now);
+    const [item] = open();
+    if (!item) throw new Error('no item filed');
+    const answered = store.answerTaskReview(task.id, item.id, 'On it', {
+      actor: { id: 'known-jordan', name: 'Jordan', kind: 'person' },
+    });
+    expect(answered.ok).toBe(true);
+    const since = e.deadBoard(wsId)?.deadSince as number;
+    expect(e.holdByRemoteTeamLead(wsId, since, now + 1000)).toBe(true);
+    e.onBoard(dead(), now + 2000);
+    e.onBoard(dead(), now + 1000 + REMOTE_HOLD_MS);
+    // POSITIVE CONTROL: the hold did lapse, since a new row would be asked.
+    expect(open()).toHaveLength(0);
+    expect(store.listReviewItems(task.id)).toHaveLength(1);
+  });
+
   it('ignores a word about another stretch, or a board that is not dead', () => {
     const e = build();
     expect(e.holdByRemoteTeamLead(wsId, now, now)).toBe(false);
@@ -179,38 +199,45 @@ describe('the Mac’s side: telling the board Team Lead has it', () => {
     });
     return { reachOn, acks, relay };
   };
-  const settle = () => new Promise((r) => setTimeout(r, 0));
 
   it('sends the word once Team Lead heard, and again only after the refresh', async () => {
     const { acks, relay } = setup();
     const t = SINCE + ESCALATE_MS;
     relay.observe([view], t);
-    await settle();
+    await waitFor(() => acks.length === 1);
     expect(acks).toEqual([[BOARD, SINCE]]);
-    relay.observe([view], t + REMOTE_ACK_REFRESH_MS - 1);
-    await settle();
-    expect(acks).toHaveLength(1);
+    // Just before the refresh nothing goes for this board. POSITIVE CONTROL:
+    // a second board in the same pass is acknowledged.
+    relay.observe([view, { ...view, boardId: 'w-saltmarsh' }], t + REMOTE_ACK_REFRESH_MS - 1);
+    await waitFor(() => acks.length >= 2);
+    expect(acks.map(([b]) => b)).toEqual([BOARD, 'w-saltmarsh']);
     relay.observe([view], t + REMOTE_ACK_REFRESH_MS);
-    await settle();
-    expect(acks).toHaveLength(2);
+    await waitFor(() => acks.length >= 3);
+    expect(acks[2]).toEqual([BOARD, SINCE]);
   });
 
   it('sends no word while Team Lead cannot be reached here', async () => {
     const { reachOn, acks, relay } = setup();
     reachOn.clear();
     relay.observe([view], SINCE + ESCALATE_MS);
-    await settle();
-    expect(acks).toEqual([]);
+    // POSITIVE CONTROL: a board that is reachable, observed after it, is
+    // acknowledged, so an ack for the first would have arrived first.
+    reachOn.add('w-harbour');
+    relay.observe([{ ...view, boardId: 'w-saltmarsh' }], SINCE + ESCALATE_MS);
+    await waitFor(() => acks.length > 0);
+    expect(acks).toEqual([['w-saltmarsh', SINCE]]);
   });
 
   it('stops repeating it once Team Lead goes', async () => {
     const { reachOn, acks, relay } = setup();
     const t = SINCE + ESCALATE_MS;
     relay.observe([view], t);
-    await settle();
+    await waitFor(() => acks.length === 1);
     reachOn.clear();
     relay.observe([view], t + REMOTE_ACK_REFRESH_MS);
-    await settle();
-    expect(acks).toHaveLength(1);
+    reachOn.add('w-harbour');
+    relay.observe([{ ...view, boardId: 'w-saltmarsh' }], t + REMOTE_ACK_REFRESH_MS);
+    await waitFor(() => acks.length >= 2);
+    expect(acks.map(([b]) => b)).toEqual([BOARD, 'w-saltmarsh']);
   });
 });

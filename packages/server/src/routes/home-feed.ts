@@ -81,6 +81,9 @@ export interface HomeFeedRoutesContext {
   /** Team Lead on the caller's machine holds the stretch that began at
    *  `deadSince`; true when that is the board's current one. Absent → 404. */
   ackEscalation?: (workspaceId: string, deadSince: number) => boolean;
+  /** Team Lead's agent id on this server (`spawnerAgentId`): with no Access
+   *  in front, the only agent whose `at2` may send the escalation ack. */
+  teamLeadAgentId?: () => string | undefined;
   /** Who follows which board's feed (`home-feed-followers.ts`). */
   followers?: HomeFeedFollowers;
   j: (status: number, body: unknown) => Response;
@@ -108,28 +111,66 @@ export function refuseWhileExternalAccessOff(
   return ctx.j(403, { error: 'sharing_disabled' });
 }
 
+type CallerContext = Pick<
+  HomeFeedRoutesContext,
+  'verifier' | 'clientId' | 'peerAddress' | 'boardGrantFor' | 'accessInFront' | 'teamLeadAgentId'
+>;
+
 /** Whether this caller may read a home feed. Never says which check failed. */
 export async function homeFeedCallerAllowed(
-  ctx: Pick<
-    HomeFeedRoutesContext,
-    'verifier' | 'clientId' | 'peerAddress' | 'boardGrantFor' | 'accessInFront'
-  >,
+  ctx: CallerContext,
   req: Request,
   /** The board the path names; without one, no board token admits. */
   boardId?: string,
 ): Promise<boolean> {
   if (!req.headers.has('cf-ray')) return isLoopbackAddress(ctx.peerAddress(req));
-  // With no Access in front, the board's own token is the proof. Where Access
-  // is in front, only the feed's service token is, with or without one.
+  return macCallerAllowed(ctx, req, boardId);
+}
+
+/**
+ * The Mac's own credential, through the tunnel. With no Access in front, the
+ * board's `at2` is the proof, and `agentId`, when given, must be the agent it
+ * was minted for. Where Access is in front, only the feed's service token
+ * is, with or without one.
+ */
+async function macCallerAllowed(
+  ctx: CallerContext,
+  req: Request,
+  boardId: string | undefined,
+  agentId?: string,
+): Promise<boolean> {
   if (ctx.accessInFront?.() === false) {
     const bearer = boardAgentBearerOf(req.headers);
     if (bearer === null || !boardId || !ctx.boardGrantFor) return false;
     if (isBrowserRequest(req.headers)) return false;
-    return ctx.boardGrantFor(bearer)?.boardId === boardId;
+    const grant = ctx.boardGrantFor(bearer);
+    if (grant?.boardId !== boardId) return false;
+    return agentId === undefined || grant.agentId === agentId;
   }
   if (!ctx.verifier || !ctx.clientId) return false;
   const result = await ctx.verifier(req);
   return result.ok && result.email === undefined && result.commonName === ctx.clientId;
+}
+
+/**
+ * Who may tell this board that Team Lead on the Mac holds it: the Mac and
+ * nobody else. Unlike a feed read, a loopback caller is refused, since a
+ * process on this machine (the dead board's own lead among them) must not
+ * be able to keep the owner's item off; and with no Access in front the
+ * `at2` must be one minted for Team Lead, not the board's lead's.
+ */
+export async function escalationAckCallerAllowed(
+  ctx: CallerContext,
+  req: Request,
+  boardId: string,
+): Promise<boolean> {
+  if (!req.headers.has('cf-ray')) return false;
+  if (ctx.accessInFront?.() === false) {
+    const teamLead = ctx.teamLeadAgentId?.();
+    if (!teamLead) return false;
+    return macCallerAllowed(ctx, req, boardId, teamLead);
+  }
+  return macCallerAllowed(ctx, req, boardId);
 }
 
 export async function handleHomeFeedRoute(
@@ -142,10 +183,15 @@ export async function handleHomeFeedRoute(
   const boardId = m[1] as string;
   const shut = refuseWhileExternalAccessOff(ctx, req);
   if (shut) return shut;
+  if (m[2] === '/escalation-ack') {
+    if (!(await escalationAckCallerAllowed(ctx, req, boardId))) {
+      return ctx.j(403, { error: 'forbidden' });
+    }
+    return ackRoute(ctx, req, boardId);
+  }
   if (!(await homeFeedCallerAllowed(ctx, req, boardId))) {
     return ctx.j(403, { error: 'forbidden' });
   }
-  if (m[2] === '/escalation-ack') return ackRoute(ctx, req, boardId);
   if (req.method !== 'GET') return ctx.j(405, { error: 'method-not-allowed' });
   if (ctx.boardName(boardId) === undefined) return ctx.j(404, { error: 'not_found' });
   if (m[2]) {
@@ -174,13 +220,34 @@ export async function handleHomeFeedRoute(
 /** The most bytes an acknowledgement body may be. */
 const MAX_ACK_BYTES = 256;
 
+/** The body as text, or null once it passes `max` bytes; never reads more
+ *  than one chunk past the cap. */
+async function readBounded(req: Request, max: number): Promise<string | null> {
+  if (Number(req.headers.get('content-length') ?? 0) > max) return null;
+  if (!req.body) return '';
+  const reader = req.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > max) {
+      await reader.cancel().catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+  return new TextDecoder().decode(Buffer.concat(chunks));
+}
+
 async function ackRoute(ctx: HomeFeedRoutesContext, req: Request, boardId: string) {
   if (req.method !== 'POST') return ctx.j(405, { error: 'method-not-allowed' });
   if (!ctx.ackEscalation || ctx.boardName(boardId) === undefined) {
     return ctx.j(404, { error: 'not_found' });
   }
-  const raw = await req.text();
-  if (raw.length > MAX_ACK_BYTES) return ctx.j(413, { error: 'too_large' });
+  const raw = await readBounded(req, MAX_ACK_BYTES);
+  if (raw === null) return ctx.j(413, { error: 'too_large' });
   let deadSince: unknown;
   try {
     deadSince = (JSON.parse(raw) as { deadSince?: unknown })?.deadSince;

@@ -6,6 +6,7 @@
  * as is the one line `RESTART_HEADER` matches.
  */
 import { describe, expect, it } from 'bun:test';
+import { deliverToInbox } from '../src/org-relay/relay-client.ts';
 import { type RelayConfig, parseRelayConfig } from '../src/org-relay/relay-config.ts';
 import { RESTART_HEADER, parseRelayKind } from '../src/org-relay/relay-kinds.ts';
 import { applyOrganizationRule, deliveredText } from '../src/org-relay/relay-rule.ts';
@@ -130,5 +131,44 @@ describe('the delivered text', () => {
     expect(deliveredText(from, false, '', { kind: 'wake' }, to)).toBe(
       'Relay wake from team-lead, organization harborlight.',
     );
+  });
+});
+
+describe('delivering addressed to the seat’s agent', () => {
+  const server = config.servers.get('harbor');
+  if (!server) throw new Error('fixture server missing');
+  const posting = (answers: Response[]) => {
+    const bodies: Array<Record<string, unknown>> = [];
+    const fetchFn = async (_url: string, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return answers.shift() ?? new Response('{}', { status: 200 });
+    };
+    return { bodies, fetchFn };
+  };
+  const badAddressee = () => Response.json({ error: 'bad_addressee' }, { status: 400 });
+
+  it('posts once, addressed, when the server takes it', async () => {
+    const { bodies, fetchFn } = posting([]);
+    expect(await deliverToInbox(fetchFn, server, BOARD, 'task:t-in', 'hi', 'r-1', 'agent-a')).toBe(
+      true,
+    );
+    expect(bodies.map((b) => b.to)).toEqual([['agent-a']]);
+  });
+
+  it('posts again unaddressed when the agent is not attached there', async () => {
+    const { bodies, fetchFn } = posting([badAddressee()]);
+    expect(await deliverToInbox(fetchFn, server, BOARD, 'task:t-in', 'hi', 'r-2', 'agent-a')).toBe(
+      true,
+    );
+    expect(bodies.map((b) => b.to)).toEqual([['agent-a'], undefined]);
+    expect(bodies[1]?.requestId).toBe('r-2');
+  });
+
+  it('does not retry another refusal', async () => {
+    const { bodies, fetchFn } = posting([Response.json({ error: 'bad_text' }, { status: 400 })]);
+    expect(await deliverToInbox(fetchFn, server, BOARD, 'task:t-in', 'hi', 'r-3', 'agent-a')).toBe(
+      false,
+    );
+    expect(bodies).toHaveLength(1);
   });
 });

@@ -603,7 +603,7 @@
   "POST /workspaces/:ws/goals/add": "400 application/json error=author required {error} | by workspaces.ts:handleWorkspaceGoalRoutes > workspace-goals.ts:handleWorkspaceGoals",
   "POST /workspaces/:ws/goals/rename": "400 application/json error=author required {error} | by workspaces.ts:handleWorkspaceGoalRoutes > workspace-goals.ts:handleWorkspaceGoals",
   "POST /workspaces/:ws/goals/reorder": "400 application/json error=author required {error} | by workspaces.ts:handleWorkspaceGoalRoutes > workspace-goals.ts:handleWorkspaceGoals",
-  "POST /workspaces/:ws/home-feed/escalation-ack": "400 application/json error=bad_dead_since {error} | by home-feed.ts:handleHomeFeedRoute",
+  "POST /workspaces/:ws/home-feed/escalation-ack": "403 application/json error=forbidden {error} | by home-feed.ts:handleHomeFeedRoute",
   "POST /workspaces/:ws/home/read": "400 application/json error=author.name is required {error} | by workspaces.ts:handleWorkspaceRoutes > workspace-home.ts:handleWorkspaceHome",
   "POST /workspaces/:ws/huddles": "200 application/json {docId,hubWorkspaceId,meta,reviewUrl,url} | by workspaces.ts:handleWorkspaceRoutes > workspace-content.ts:handleWorkspaceContent",
   "POST /workspaces/:ws/import-tasks": "400 application/json error=path required {error} | by workspaces.ts:handleWorkspaceRoutes > workspace-content.ts:handleWorkspaceContent",

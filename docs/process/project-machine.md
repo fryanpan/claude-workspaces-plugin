@@ -477,7 +477,13 @@ the machine.
 
 **A restart Team Lead asks for.** When `CW_LEAD_INBOX_DOC` (the lead seat's
 inbox doc) and `CW_RELAY_AGENT_ID` (the agent id of the org relay's board
-token) are both set, `lead.sh` runs `lead-restart.ts` every 30 seconds. It
+token) are both set, `lead.sh` runs `lead-restart.ts` every 30 seconds.
+Nothing sets them for you: whoever installs the relay sets both by hand, as
+Fly secrets on the project's app (`fly secrets set CW_LEAD_INBOX_DOC=task:t-…
+CW_RELAY_AGENT_ID=agent-…`), taking the values from the lead seat in the
+relay config, and `entrypoint.sh` passes them to the lead. Each check is cut
+off after 20 seconds, and each call it makes after 10, so a board server that
+hangs cannot stop the supervisor watching the session. It
 reads the inbox doc's threads over the board socket and answers `restart`
 only for the org relay's restart line for this lead, on a thread the relay's
 token opened, under ten minutes old and not handled before

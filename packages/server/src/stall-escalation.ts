@@ -368,6 +368,10 @@ export class StallEscalations {
     if (dead.remoteTeamLeadAt !== undefined && now - dead.remoteTeamLeadAt < REMOTE_HOLD_MS) {
       if (dead.filed && itemOpen) {
         this.withdrawItem(key, dead.filed, 'Team Lead on another server has it');
+      } else if (dead.filed && item) {
+        // A person already answered it: they have seen these rows, so the
+        // hold lapsing must not ask them again.
+        dead.seenRowIds = union(dead.seenRowIds ?? [], dead.filed.rowIds);
       }
       dead.filed = undefined;
       this.sidecar[key] = { dead };
