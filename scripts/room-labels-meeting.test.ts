@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { MeetingStore } from '../packages/server/src/meetings.ts';
 
@@ -18,7 +19,7 @@ import { MeetingStore } from '../packages/server/src/meetings.ts';
  * Fictional names, throwaway data dir.
  */
 
-const SCRIPT = join(dirname(new URL(import.meta.url).pathname), 'room-labels-check.ts');
+const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), 'room-labels-check.ts');
 
 let dataDir: string;
 let truthFile: string;

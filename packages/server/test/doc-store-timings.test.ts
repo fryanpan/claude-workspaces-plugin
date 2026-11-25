@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { fileURLToPath } from 'node:url';
 import {
   DEFAULT_DOC_STORE_TIMINGS,
   DOC_STORE_TIMINGS,
@@ -52,7 +53,12 @@ describe('doc timings', () => {
           'console.log(JSON.stringify(m.DOC_STORE_TIMINGS));',
         ].join(''),
       ],
-      { cwd: new URL('../../..', import.meta.url).pathname, env, stdout: 'pipe', stderr: 'pipe' },
+      {
+        cwd: fileURLToPath(new URL('../../..', import.meta.url)),
+        env,
+        stdout: 'pipe',
+        stderr: 'pipe',
+      },
     );
     const [out, err, code] = await Promise.all([
       new Response(proc.stdout).text(),

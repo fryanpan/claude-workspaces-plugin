@@ -11,8 +11,9 @@
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-export const TF_DIR = dirname(new URL(import.meta.url).pathname);
+export const TF_DIR = dirname(fileURLToPath(import.meta.url));
 
 export const ENVS = ['prod', 'staging'] as const;
 export type TfEnv = (typeof ENVS)[number];

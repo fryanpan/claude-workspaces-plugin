@@ -76,6 +76,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { TfOutputs } from '../cloudflare/outputs.ts';
 import { type TfEnv, isEnv } from '../cloudflare/terraform.ts';
 import { recipientKey } from '../handoff/items.ts';
@@ -145,7 +146,7 @@ import {
 } from './token-list.ts';
 import { type AppliedTunnel, TUNNEL_TOKEN_SECRET, appliedTunnel } from './tunnel-plan.ts';
 
-const REPO = join(dirname(new URL(import.meta.url).pathname), '..', '..');
+const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PREFIX = 'snapshots/';
 
 function arg(args: string[], name: string): string | undefined {
