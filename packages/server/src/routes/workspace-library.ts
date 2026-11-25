@@ -10,6 +10,7 @@ import { starsFor } from '../library-stars.ts';
 import { personKeyOf, viewsFor } from '../library-views.ts';
 import {
   type LibrarySources,
+  type MarkdownLister,
   type ProjectFile,
   birthOf,
   buildLibrary,
@@ -71,7 +72,7 @@ export interface LibraryRoutesContext {
   /** Take a doc filed here out of the default holding board. */
   unfileFromDefault: (attachmentId: string, keptBoardWorkspaceId: string) => void;
   /** The project's markdown files — cached, see `createMarkdownLister`. */
-  markdownFiles: (root: string) => readonly ProjectFile[];
+  markdownFiles: MarkdownLister;
   /** The request's SOCKET address, never a header. */
   requestAddress: (req: Request) => string | undefined;
   /** Whether an attachment set keeps its files on this machine
@@ -131,7 +132,7 @@ export async function handleLibraryRoutes(
   if (!scope || (!items && !open)) return undefined;
   if (items && req.method === 'GET') {
     const onBox = !visitor && isOnBox(ctx, req);
-    const src = sourcesFor(ctx, scope, onBox);
+    const src = visitor ? sourcesFor(ctx, scope, onBox) : await listedSources(ctx, scope, onBox);
     const payload = buildLibrary(visitor ? visitorSources(src) : src);
     const onBoard = new Set(scope.board.docIds);
     const viewer = viewerOf(rq);
@@ -167,6 +168,24 @@ function visitorSources(src: LibrarySources): LibrarySources {
 function isOnBox(ctx: LibraryRoutesContext, req: Request): boolean {
   if (req.headers.has('cf-ray')) return false;
   return isLoopbackAddress(ctx.requestAddress(req));
+}
+
+/** `sourcesFor`, the project listed first with the event loop free (`ready`):
+ *  a list or open walking a 200k-entry tree in the request held the server. */
+async function listedSources(
+  ctx: LibraryRoutesContext,
+  scope: Pick<WorkspaceScope<BoardWorkspace>, 'workspaceId' | 'board'>,
+  onBox: boolean,
+): Promise<LibrarySources> {
+  const listed = new Map<string, readonly ProjectFile[]>();
+  const lister = (root: string) => listed.get(root) ?? ctx.markdownFiles(root);
+  const src = sourcesFor(ctx, scope, onBox, lister);
+  const repoKey = projectRepoKey(src.docs, src.docKeyOf);
+  const root = repoKey === null ? null : src.projectRoot(repoKey);
+  if (root !== null && ctx.markdownFiles.ready) {
+    listed.set(root, await ctx.markdownFiles.ready(root));
+  }
+  return src;
 }
 
 /** What the Library of this board is built from, as seen on the box or off it. */
@@ -340,7 +359,7 @@ async function openFile(
   if (typeof relPath !== 'string' || relPath === '' || relPath.length > MAX_PATH_CHARS) {
     return j(400, { error: 'path required' });
   }
-  const src = sourcesFor(ctx, scope, isOnBox(ctx, req));
+  const src = await listedSources(ctx, scope, isOnBox(ctx, req));
   const repoKey = projectRepoKey(src.docs, src.docKeyOf);
   const root = repoKey ? src.projectRoot(repoKey) : null;
   if (!repoKey || !root) return j(404, { error: 'not-listed' });

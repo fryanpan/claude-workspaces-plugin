@@ -1,8 +1,15 @@
 import { execFile, spawnSync } from 'node:child_process';
-import { readdirSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { isUnsupportedType } from './folder-file-types.ts';
-import { containedRoot, includedStat, readdirContained } from './fs-scan-contained.ts';
+import {
+  containedRoot,
+  includedStat,
+  mapSliced,
+  readdirContained,
+  readdirContainedAsync,
+  readdirPlain,
+  readdirPlainAsync,
+} from './fs-scan-contained.ts';
 import { containedGit, isSafeGitName } from './git-contained.ts';
 import { gitBarred, hardenedGitArgs, hardenedGitEnv } from './git-hardening.ts';
 
@@ -167,7 +174,7 @@ export function listFolderOrThrow(root: string, skipped: SkippedFile[] | null): 
   // list the repo's ignored `service-account.json` and `secrets.yaml`. A
   // root no git may run in (`gitBarred`) is walked, as it always was.
   if (!barred && repoKindSync(root) !== 'not-a-repo') throw new GitListingFailed(root);
-  return readdirRecursive(root, root, skipped);
+  return readdirRecursive(root, skipped);
 }
 
 /** `git ls-files` failed in a folder that is, or may be, a git work tree. */
@@ -263,25 +270,30 @@ const LISTING_ARGS = ['--cached', '--others', '--exclude-standard'];
 function admitGitListed(root: string, rels: string[], skipped: SkippedFile[] | null): string[] {
   const out: string[] = [];
   for (const rel of rels) {
-    if (!isSafeGitName(rel)) continue;
-    const name = rel.split('/').pop() ?? rel;
-    const reason = isCredentialShapedName(name)
-      ? 'credential-name'
-      : isUnsupportedType(name)
-        ? 'unsupported-type'
-        : null;
-    if (reason) skipped?.push({ path: rel, reason });
-    else out.push(join(root, rel));
+    const abs = admitOne(root, rel, skipped);
+    if (abs !== null) out.push(abs);
   }
   return out;
 }
 
+function admitOne(root: string, rel: string, skipped: SkippedFile[] | null): string | null {
+  if (!isSafeGitName(rel)) return null;
+  const name = rel.split('/').pop() ?? rel;
+  const reason = isCredentialShapedName(name)
+    ? 'credential-name'
+    : isUnsupportedType(name)
+      ? 'unsupported-type'
+      : null;
+  if (reason) skipped?.push({ path: rel, reason });
+  return reason ? null : join(root, rel);
+}
+
 /**
  * `scanFolderPaths` with the `git` subprocess off the event loop, for a
- * listing nobody is waiting on (`fs-listing.ts` refreshes in the background
- * with it). The readdir fallback and the include `lstat`s stay synchronous:
- * a folder outside git is small or slow either way, and it is the subprocess
- * that grows with the repository.
+ * listing a request must not hold the server for (`fs-listing.ts`'s
+ * background rescan, the Library's listing). The readdir fallback gives the
+ * loop a turn between slices of the walk; the include `lstat`s stay
+ * synchronous, at most `MAX_INCLUDE` of them.
  */
 export async function scanFolderPathsAsync(
   root: string,
@@ -304,13 +316,15 @@ export async function scanFolderPathsAsync(
         });
   let files: string[];
   noteListing(root, rels !== null);
-  if (rels !== null) files = admitGitListed(root, rels, null);
+  // Sliced like the walk: 200k paths took ~280ms to admit and spell back.
+  if (rels !== null) files = await mapSliced(rels, (rel) => admitOne(root, rel, null));
   else if (barred || (await repoKindAsync(root)) === 'not-a-repo') {
-    files = readdirRecursive(root, root, null);
+    files = await readdirRecursiveAsync(root);
   }
   // Rejects, so the cache keeps the listing it had (see `listFolderOrThrow`).
   else throw new GitListingFailed(root);
-  return toSortedRel(root, withIncluded(root, files, include));
+  const listed = withIncluded(root, files, include);
+  return (await mapSliced(listed, (abs) => relative(root, abs).split(sep).join('/'))).sort();
 }
 
 /**
@@ -482,38 +496,21 @@ function fileSkip(name: string): SkipReason | null {
   return isUnsupportedType(name) ? 'unsupported-type' : null;
 }
 
-const CONTAINED_SKIPS = {
+const SKIPS = {
   skipDir: dirSkip,
   skipFile: fileSkip,
   notRegular: 'not-a-regular-file',
 } as const;
 
-function readdirRecursive(root: string, dir: string, skipped: SkippedFile[] | null): string[] {
-  const contained = dir === root ? containedRoot(root) : null;
-  if (contained) return readdirContained(root, contained, skipped, CONTAINED_SKIPS);
-  const out: string[] = [];
-  let entries: import('node:fs').Dirent[];
-  try {
-    entries = readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return out;
-  }
-  for (const entry of entries) {
-    const name = entry.name;
-    const abs = join(dir, name);
-    const rel = (): string => relative(root, abs).split(sep).join('/');
-    if (entry.isDirectory()) {
-      const reason = dirSkip(name);
-      // `.git` is the repository's own store, not a file anybody left out.
-      if (reason === null) out.push(...readdirRecursive(root, abs, skipped));
-      else if (name !== '.git') skipped?.push({ path: `${rel()}/`, reason });
-    } else if (entry.isFile()) {
-      const reason = fileSkip(name);
-      if (reason) skipped?.push({ path: rel(), reason });
-      else out.push(abs);
-    } else {
-      skipped?.push({ path: rel(), reason: 'not-a-regular-file' });
-    }
-  }
-  return out;
+function readdirRecursive(root: string, skipped: SkippedFile[] | null): string[] {
+  const contained = containedRoot(root);
+  if (contained) return readdirContained(root, contained, skipped, SKIPS);
+  return readdirPlain(root, root, skipped, SKIPS);
+}
+
+/** `readdirRecursive`, giving the event loop a turn between slices. */
+function readdirRecursiveAsync(root: string): Promise<string[]> {
+  const contained = containedRoot(root);
+  if (contained) return readdirContainedAsync(root, contained, null, SKIPS);
+  return readdirPlainAsync(root, root, null, SKIPS);
 }

@@ -301,10 +301,23 @@ export interface TreeListed {
  * opens without one is skipped. `enter` says whether to walk into a folder.
  * Null past `maxEntries`, as a listing too big to give.
  */
-export function listTreeSync(
+export function listTreeSync(c: Contained, opts: TreeWalkOptions): TreeListed[] | null {
+  const walk = walkTree(c, opts);
+  for (let step = walk.next(); ; step = walk.next()) if (step.done) return step.value;
+}
+
+export type TreeWalkOptions = {
+  maxEntries: number;
+  enter?: (rel: string, name: string) => boolean;
+};
+
+/** `listTreeSync` one folder at a time: it yields how many entries each
+ *  folder held, so a caller can give the event loop a turn between folders.
+ *  No descriptor is held open across a yield. */
+export function* walkTree(
   c: Contained,
-  opts: { maxEntries: number; enter?: (rel: string, name: string) => boolean },
-): TreeListed[] | null {
+  opts: TreeWalkOptions,
+): Generator<number, TreeListed[] | null> {
   const n = native(c.abs);
   const dev = rootDev(c.root);
   const base = namesOf(c).join('/');
@@ -338,6 +351,7 @@ export function listTreeSync(
       out.push({ rel: childRel, kind });
       if (kind === 'dir' && (opts.enter?.(childRel, e.name) ?? true)) dirs.push(childRel);
     }
+    yield entries.length;
   }
   return out;
 }

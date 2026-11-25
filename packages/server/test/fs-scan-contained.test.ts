@@ -5,12 +5,21 @@
  * never named, and a refused root listing nothing. A folder outside every
  * root takes the plain walk (the control). macOS only. Fixtures synthetic.
  */
-import { afterAll, describe, expect, it } from 'bun:test';
+import { afterAll, afterEach, describe, expect, it } from 'bun:test';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { BoardSocketRoots, boardSocketRootsPath } from '../src/board-socket-roots.ts';
-import { containedRoot, includedStat, readdirContained } from '../src/fs-scan-contained.ts';
+import {
+  CONTAINED_WALK,
+  WALK_SLICE,
+  containedRoot,
+  includedStat,
+  readdirContained,
+  readdirContainedAsync,
+  readdirPlain,
+  readdirPlainAsync,
+} from '../src/fs-scan-contained.ts';
 import { boundFiles } from '../src/slow-fs.ts';
 import { makeFifo } from './fifo.ts';
 
@@ -87,5 +96,73 @@ describe.skipIf(process.platform !== 'darwin')('the folder scan under a walled l
   it('takes the plain walk for a folder outside every root (control)', () => {
     expect(containedRoot(outside)).toBeNull();
     expect(includedStat(join(outside, 'secret.md'))).toHaveProperty('size', 9);
+  });
+
+  /**
+   * The walk a Library load ran in prod: 200k entries under a walled root,
+   * read in one go, then nothing listed. The cap and the slice are lowered
+   * so a small tree is past both; the loop's turns are counted by a tick
+   * re-armed with `setImmediate`, which a synchronous walk never lets run.
+   */
+  describe('the sliced walk', () => {
+    const big = join(top, 'saltmarsh');
+    for (let d = 0; d < 12; d++) {
+      mkdirSync(join(big, `bay-${d}`), { recursive: true });
+      for (let f = 0; f < 10; f++) writeFileSync(join(big, `bay-${d}`, `tide-${f}.md`), '#\n');
+    }
+    expect(roots.set('w-salt', [big]).ok).toBe(true);
+    const saved = { max: CONTAINED_WALK.max, slice: WALK_SLICE.entries };
+    afterEach(() => {
+      CONTAINED_WALK.max = saved.max;
+      WALK_SLICE.entries = saved.slice;
+    });
+
+    async function turnsDuring<T>(work: () => Promise<T>): Promise<{ turns: number; value: T }> {
+      let turns = 0;
+      let done = false;
+      const tick = () => {
+        if (done) return;
+        turns++;
+        setImmediate(tick);
+      };
+      setImmediate(tick);
+      const value = await work();
+      done = true;
+      return { turns, value };
+    }
+
+    it('lists what the synchronous walk lists, a turn of the loop per slice', async () => {
+      WALK_SLICE.entries = 10;
+      const c = containedRoot(big) ?? 'refused';
+      const want = readdirContained(big, c, null, skips).sort();
+      expect(want.length).toBe(120);
+      const { turns, value } = await turnsDuring(() => readdirContainedAsync(big, c, null, skips));
+      expect(value.sort()).toEqual(want);
+      // 132 entries (12 folders, 120 files) in slices of 10.
+      expect(turns).toBeGreaterThanOrEqual(12);
+    });
+
+    it('stops at the cap and lists nothing, still a slice at a time', async () => {
+      WALK_SLICE.entries = 10;
+      CONTAINED_WALK.max = 50;
+      const c = containedRoot(big) ?? 'refused';
+      expect(readdirContained(big, c, null, skips)).toEqual([]);
+      const { turns, value } = await turnsDuring(() => readdirContainedAsync(big, c, null, skips));
+      expect(value).toEqual([]);
+      expect(turns).toBeGreaterThan(0);
+      // Control: the same tree under the real cap lists every file.
+      CONTAINED_WALK.max = saved.max;
+      expect((await readdirContainedAsync(big, c, null, skips)).length).toBe(120);
+    });
+
+    it('slices the plain walk the same way, outside every root (control)', async () => {
+      WALK_SLICE.entries = 10;
+      mkdirSync(join(outside, 'deep', 'er'), { recursive: true });
+      writeFileSync(join(outside, 'deep', 'er', 'x.md'), '#\n');
+      const want = readdirPlain(outside, outside, null, skips).sort();
+      expect(want).toEqual([join(outside, 'deep', 'er', 'x.md'), join(outside, 'secret.md')]);
+      const { value } = await turnsDuring(() => readdirPlainAsync(outside, outside, null, skips));
+      expect(value.sort()).toEqual(want);
+    });
   });
 });
