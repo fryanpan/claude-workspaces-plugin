@@ -26,7 +26,7 @@
  * same reason `nudge-line.ts` and `voice-line.ts` are: the wording is a
  * decision, and inline in a 3,000-line switch it cannot be asserted.
  */
-import type { NextAnswer } from '../../server/src/index.ts';
+import type { NextAnswer } from '../../server/src/routes/contracts.ts';
 
 /** A queue row as `GET /workspaces/:ws/next` answers it. */
 type NextRow = NextAnswer['tasks'][number];

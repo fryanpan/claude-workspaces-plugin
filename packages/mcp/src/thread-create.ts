@@ -7,7 +7,7 @@
  * about the task, and a fresh task's description is empty — there is nothing
  * in it to find.
  */
-import type { ThreadByFindBody, ThreadCreateBody } from '../../server/src/index.ts';
+import type { ThreadByFindBody, ThreadCreateBody } from '../../server/src/routes/contracts.ts';
 
 export interface ThreadCreateInput {
   docId: string;

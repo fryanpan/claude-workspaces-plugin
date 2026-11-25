@@ -4,7 +4,7 @@ import type { Hono } from 'hono';
  *
  * Each type named here is a server app or route contract
  * (`packages/server/src/routes/mounts-api.ts`, and the `*-contract.ts`
- * modules beside it, re-exported from the server's `index.ts`). Only the
+ * modules beside it, re-exported as types from `routes/contracts.ts`). Only the
  * TYPE crosses the package line — `import type` is erased from the bundle —
  * so a field the server renames, or a route it moves, fails
  * `bun run typecheck` at the tool that sends it.
@@ -45,7 +45,7 @@ import type {
   WhiteboardContract,
   WorkspaceAgentsContract,
   WorkspaceBoardContract,
-} from '../../server/src/index.ts';
+} from '../../server/src/routes/contracts.ts';
 
 /** The REST call `http-client.ts` builds; throws on a non-2xx. */
 type Http = (method: string, path: string, body?: unknown) => Promise<unknown>;

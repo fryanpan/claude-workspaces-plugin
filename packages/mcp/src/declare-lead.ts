@@ -15,7 +15,7 @@
  * read its source. Order and drained state are not things source-reading can
  * check.
  */
-import type { AttachAgentAnswer } from '../../server/src/index.ts';
+import type { AttachAgentAnswer } from '../../server/src/routes/contracts.ts';
 import { workspaceAgentsClient, workspaceBoardClient } from './server-client.ts';
 export interface DeclareLeadDeps {
   http: (method: string, path: string, body?: unknown) => Promise<unknown>;

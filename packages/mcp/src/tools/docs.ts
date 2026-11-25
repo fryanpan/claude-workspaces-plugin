@@ -23,7 +23,7 @@
  * behaviour or its reply changed here.
  */
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import type { ScopedEditFields } from '../../../server/src/index.ts';
+import type { ScopedEditFields } from '../../../server/src/routes/contracts.ts';
 import type { AgentAuthor } from '../author.ts';
 import { boardIdOf, boardPathOf } from '../board-path.ts';
 import {
