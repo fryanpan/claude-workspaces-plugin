@@ -124,7 +124,7 @@ function syntheticData() {
 }
 
 const READ_MAP = (which: string) => `(() => {
-  const maps = [...document.querySelectorAll('#editor .mdx-map')];
+  const maps = [...document.querySelectorAll('#editor .mdx-map .cw-map-slot')];
   const slot = maps[${which === 'inline' ? 0 : 1}];
   if (!slot || !slot.dataset.markers) return null;
   const tiles = slot.querySelectorAll('img.leaflet-tile-loaded');
@@ -156,7 +156,7 @@ const READ_MAP = (which: string) => `(() => {
     ringPaths: slot.querySelectorAll('path.cw-map-ring').length,
     coloursPainted,
     canvasShown: !!canvas && Math.abs(canvas.getBoundingClientRect().width - canvas.width) < 2,
-    legend: [...(block?.querySelectorAll('.mdx-map-legend li') ?? [])].map((li) => li.textContent),
+    legend: [...(block?.querySelectorAll('.cw-map-legend li') ?? [])].map((li) => li.textContent),
     framed: !!slot.closest('iframe') || !!block?.querySelector('iframe'),
     width: slot.getBoundingClientRect().width,
     column: col.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight),
@@ -296,7 +296,7 @@ async function main(): Promise<void> {
       if (shots) {
         mkdirSync(shots, { recursive: true });
         await cdp.evaluate(
-          `document.querySelector('#editor .mdx-map').scrollIntoView({ block: 'center' })`,
+          `document.querySelector('#editor .mdx-map .cw-map-slot').scrollIntoView({ block: 'center' })`,
         );
         await sleep(300);
         const shot = (await cdp.send('Page.captureScreenshot', { format: 'png' })) as {
@@ -311,14 +311,14 @@ async function main(): Promise<void> {
 
     step('click the first marker');
     await cdp.evaluate(
-      `document.querySelector('#editor .mdx-map path.cw-map-marker').scrollIntoView({ block: 'center', behavior: 'instant' })`,
+      `document.querySelector('#editor .mdx-map .cw-map-slot path.cw-map-marker').scrollIntoView({ block: 'center', behavior: 'instant' })`,
     );
     // The doc may still be scrolling or settling: click where the marker
     // stands once two reads agree.
     let last = '';
     const at = (await until('the marker to stand still', async () => {
       const r = (await cdp.evaluate(`(() => {
-        const r = document.querySelector('#editor .mdx-map path.cw-map-marker').getBoundingClientRect();
+        const r = document.querySelector('#editor .mdx-map .cw-map-slot path.cw-map-marker').getBoundingClientRect();
         return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
       })()`)) as { x: number; y: number };
       const key = JSON.stringify(r);

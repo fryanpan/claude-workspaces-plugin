@@ -113,12 +113,22 @@ const BUILTINS: ComponentHostApi = {
         plotChartOf(new Map(Object.entries(props).filter(([, v]) => v !== UNREADABLE))),
       );
     },
-    StreetMap: (el, props) => {
-      titleInto(el, props.title);
-      renderStreetMap(el, streetMapOf(new Map(Object.entries(props))));
-    },
   },
 };
+
+/** The page's built-ins for one mounted bundle: a `<StreetMap>` inside a
+ *  component reads its `id`'s live state through the bundle's own hooks. */
+function builtinsWith(stateFor: (id: string) => StateHook | undefined): ComponentHostApi {
+  return {
+    builtins: {
+      ...BUILTINS.builtins,
+      StreetMap: (el, props) => {
+        titleInto(el, props.title);
+        renderStreetMap(el, streetMapOf(new Map(Object.entries(props))), stateFor);
+      },
+    },
+  };
+}
 
 let redefineTolerated = false;
 function tolerateRedefine(): void {
@@ -209,7 +219,8 @@ export class ComponentMount {
     if (mine !== this.token) return;
     this.release();
     try {
-      const out = mod.default(this.host, { ...BUILTINS, state: (id) => this.stateFor(id) });
+      const stateFor = (id: string) => this.stateFor(id);
+      const out = mod.default(this.host, { ...builtinsWith(stateFor), state: stateFor });
       if (typeof out === 'function') this.cleanup = out as () => void;
       this.mounted = hash;
       this.say(componentBuildOf(componentBuildsMap(this.live.ydoc), this.keyOf() ?? ''));

@@ -6,9 +6,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./map": "./src/map.ts",
-    "./draw": "./src/draw.ts",
-    "./placed": "./src/placed.ts"
+    "./map": "./src/map.ts"
   },
   "scripts": {
     "pack": "bun run scripts/pack.ts",
