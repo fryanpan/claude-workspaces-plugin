@@ -201,32 +201,31 @@ export class AgentNoteLog {
    * Every agent's lines on this board at or after `since`, newest first —
    * the read behind Home's "Not on a task" list (`agent-note-placement.ts`).
    *
-   * The cap is PER AGENT and applied inside the walk, for the reason
-   * `tailMatching` filters inside it: a board-wide cap would let one chatty
-   * agent fill the read and drop a quiet one from the list. Notes past an
-   * agent's cap are counted in `skipped`, not kept. The walk keeps the same
-   * two bounds as every read here. "Newest" for the cut is file order, which
-   * is `at` order except across a clock change.
+   * The cap is PER AGENT, so one chatty agent cannot push a quiet one off
+   * the list, and it keeps each agent's newest `perAgent` by `at`, not by
+   * file position: a delayed hook or a clock change appends a newer note
+   * before an older one, and a cut in file order would drop the newer.
+   * Notes past an agent's cap are counted in `skipped`, not kept. The walk
+   * keeps the same two bounds as every read here, which also bound what is
+   * held before the cut.
    */
   readBoard(workspaceId: string, since: number, perAgent: number): BoardNotesRead {
     const cap = Math.max(0, perAgent);
-    const kept = new Map<string, number>();
+    const inWindow = this.tailMatching(workspaceId, (n) => n.at >= since, Number.MAX_SAFE_INTEGER);
+    const byAgent = new Map<string, LoggedAgentNote[]>();
+    for (const n of inWindow) {
+      const key = normalizeAgent(n.agent);
+      const list = byAgent.get(key) ?? [];
+      list.push(n);
+      byAgent.set(key, list);
+    }
+    const lines: LoggedAgentNote[] = [];
     const skipped = new Map<string, number>();
-    const lines = this.tailMatching(
-      workspaceId,
-      (n) => {
-        if (n.at < since) return false;
-        const key = normalizeAgent(n.agent);
-        const mine = kept.get(key) ?? 0;
-        if (mine < cap) {
-          kept.set(key, mine + 1);
-          return true;
-        }
-        skipped.set(key, (skipped.get(key) ?? 0) + 1);
-        return false;
-      },
-      Number.MAX_SAFE_INTEGER,
-    );
+    for (const [key, list] of byAgent) {
+      list.sort((a, b) => b.at - a.at);
+      lines.push(...list.slice(0, cap));
+      if (list.length > cap) skipped.set(key, list.length - cap);
+    }
     return { lines: lines.sort((a, b) => b.at - a.at), skipped };
   }
 

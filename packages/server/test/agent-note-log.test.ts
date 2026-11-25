@@ -248,6 +248,16 @@ describe('AgentNoteLog', () => {
     expect(read.skipped.get('riverbend')).toBeUndefined();
   });
 
+  it("keeps an agent's newest notes by time, not by where they sit in the file", () => {
+    // A delayed hook appends its newer note BEFORE an older one.
+    log.append(note({ at: 50, text: 'newest, appended first' }));
+    log.append(note({ at: 10, text: 'oldest' }));
+    log.append(note({ at: 20, text: 'middle' }));
+    const read = log.readBoard(WS, 0, 2);
+    expect(read.lines.map((n) => n.text)).toEqual(['newest, appended first', 'middle']);
+    expect(read.skipped.get('cartographer')).toBe(1);
+  });
+
   it('reads nothing, and skips nothing, on a board with no log', () => {
     const read = log.readBoard(OTHER_WS, 0, 10);
     expect(read.lines).toEqual([]);

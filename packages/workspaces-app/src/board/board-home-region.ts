@@ -135,10 +135,15 @@ export function createBoardHomeRegion(deps: BoardHomeDeps): BoardHomeRegion {
     };
   }
 
+  // A burst of pushes starts overlapping reads; only the latest one sent may
+  // write, so an older answer that resolves last cannot replace a newer one.
+  let agentNotesSeq = 0;
   async function loadAgentNotes(): Promise<void> {
+    const seq = ++agentNotesSeq;
     const res = await fetchJson<unknown>(
       `/workspaces/${encodeURIComponent(workspaceId)}/agent-notes`,
     );
+    if (seq !== agentNotesSeq) return;
     if (res) agentNotes = parseAgentNotes(res);
     schedule(renderHomeRegion);
   }

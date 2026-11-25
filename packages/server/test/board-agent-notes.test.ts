@@ -242,7 +242,7 @@ describe('GET /workspaces/:ws/agent-notes — the notes no task took', () => {
     }
   });
 
-  it('pushes no frame for a note that landed on a task', async () => {
+  it('pushes a frame for a note that landed on a task, so Home can say where it went', async () => {
     const abort = new AbortController();
     const page = listen(
       await fetch(`${base}/workspaces/${WS}/events:stream`, {
@@ -255,14 +255,12 @@ describe('GET /workspaces/:ws/agent-notes — the notes no task took', () => {
       expect(await jj<{ taskId?: string }>(await turn('Riverbend', 'Placed.'))).toHaveProperty(
         'taskId',
       );
-      // The positive control that the stream delivers at all: a later
-      // unplaced note's frame arrives, and it is the ONLY one — frames on one
-      // stream keep their order, so the placed note before it pushed none.
-      await jj(await turn('Harborlight', 'Holds nothing, so this one is unplaced.'));
-      await waitFor(() => page.find((f) => f.event === 'agent.noted'), {
-        describe: 'the agent.noted frame for the later unplaced note',
+      // An agent that held several tasks and now holds one: an open Home's
+      // header turns to "latest note went to …" only if it is told to re-read.
+      const frame = await waitFor(() => page.find((f) => f.event === 'agent.noted'), {
+        describe: 'an agent.noted frame for the placed note',
       });
-      expect(page.filter((f) => f.event === 'agent.noted')).toHaveLength(1);
+      expect(frame.data).toEqual({ event: 'agent.noted', workspaceId: WS });
     } finally {
       abort.abort();
     }
