@@ -46,13 +46,14 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { isRepoName } from '../../packages/server/src/git-push/policy.ts';
 import { MAX_PUSH_REPOS } from '../../packages/server/src/provisioning/push-keys.ts';
 import { PROJECT_NAME, SEED_BOARD_NAME } from './deploy-plan.ts';
 import { TOKEN_LABEL } from './lead-usage.ts';
 import { reservedProject } from './reserved-names.ts';
 
-const HERE = dirname(new URL(import.meta.url).pathname);
+const HERE = dirname(fileURLToPath(import.meta.url));
 export const MACHINES_FILE = join(HERE, 'machines.json');
 
 export interface Machine {

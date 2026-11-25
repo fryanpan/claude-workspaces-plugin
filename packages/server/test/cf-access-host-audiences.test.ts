@@ -8,6 +8,7 @@ import { beforeAll, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { type JSONWebKeySet, type JWK, SignJWT, exportJWK, generateKeyPair } from 'jose';
 import { createCfAccessVerifier, parseHostAudiences } from '../src/middleware/cf-access.ts';
 import { resolveServerConfig } from '../src/server-config.ts';
@@ -140,7 +141,7 @@ describe('CF_ACCESS_HOST_AUDS in the server config', () => {
         ].join(''),
       ],
       {
-        cwd: new URL('../../..', import.meta.url).pathname,
+        cwd: fileURLToPath(new URL('../../..', import.meta.url)),
         env: { ...process.env, CW_TEST_ENV_JSON: JSON.stringify(env) },
         stdout: 'pipe',
         stderr: 'pipe',

@@ -27,6 +27,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { DEFAULT_STATE_BUCKET, backendConfig } from '../cloudflare/credentials.ts';
 import { planSummary } from '../cloudflare/plan-summary.ts';
 import { APP_DIRS, type TfResult, spawnTerraform } from '../cloudflare/terraform.ts';
@@ -42,7 +43,7 @@ import {
 } from './resend.ts';
 import { type SmokeConfig, resendMailReader, runSmoke } from './smoke.ts';
 
-const HERE = dirname(new URL(import.meta.url).pathname);
+const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, '..', '..');
 
 /** The app. Everything else is read from Cloudflare and Resend at deploy time. */

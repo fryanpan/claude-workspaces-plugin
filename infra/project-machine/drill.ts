@@ -14,12 +14,13 @@
  */
 import { spawnSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { type DrillPrint, drillLimits, judgeDrill, projectConfig } from './deploy-plan.ts';
 import { deployProject, machines, tunnelAddress } from './deploy.ts';
 import { asCw, flyJson, flyOk, onMachine } from './mac-ops.ts';
 import { restoreMachine } from './restore-machine.ts';
 
-const REPO = join(dirname(new URL(import.meta.url).pathname), '..', '..');
+const REPO = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const PROBE = 'bun /app/infra/project-machine/drill-probe.ts';
 /** The probe calls the server's REST, which admits cw alone (asCw). Root
  *  makes the fixtures folder first: /data is root's, and only root writes it. */
