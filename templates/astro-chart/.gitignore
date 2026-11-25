@@ -1,2 +1,3 @@
 .astro/
 dist/
+.astro-build.lock/

@@ -74,15 +74,19 @@ async function main(): Promise<void> {
   try {
     step('build the app bundle');
     const appPkg = join(import.meta.dirname, '..');
-    const built = spawnSync('bun', ['run', join(appPkg, 'scripts', 'build.ts')], {
-      encoding: 'utf8',
-      timeout: 180_000,
-    });
+    // Its own outdir: the two whiteboard drivers share a CI shard at times, and
+    // two builds into one `dist/` delete each other's `app.js`.
+    const appDist = join(dir, 'app');
+    const built = spawnSync(
+      'bun',
+      ['run', join(appPkg, 'scripts', 'build.ts'), '--outdir', appDist],
+      { encoding: 'utf8', timeout: 180_000 },
+    );
     if (built.status !== 0) throw new Error(`app bundle build failed:\n${built.stderr}`);
     handle = createServer({
       port: 0,
       dataDir: join(dir, 'data'),
-      markdownAppDistDir: join(appPkg, 'dist'),
+      markdownAppDistDir: appDist,
       requireSignInToWrite: false,
     });
     const base = `http://127.0.0.1:${handle.port}`;

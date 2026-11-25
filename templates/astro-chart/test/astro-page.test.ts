@@ -6,7 +6,6 @@
  * opened in headless Chromium, the page shows the snapshot's rows and title
  * over the props the page wrote.
  */
-import { spawnSync } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { type Server, createServer } from 'node:http';
@@ -22,12 +21,12 @@ import {
   stopBrowser,
 } from '../../../scripts/headless-chrome.ts';
 import { STARTUP_TIMEOUT_MS, chromeLaunchArgs } from '../../../scripts/ui-shot-lib.ts';
+import { buildFixture } from './build-fixture.ts';
 
 /** The browser these cases may launch, or null to skip them.
  *  The gate, and why it defaults off, is `scripts/browser-tests.ts`. */
 const CHROME = chromeForSuite();
 
-const FIXTURE = join(import.meta.dirname, '..');
 const SUITE_MS = 180_000;
 const CASE_MS = 60_000;
 
@@ -63,18 +62,8 @@ describe.skipIf(CHROME === null)('the library chart on an Astro page', () => {
   beforeAll(async () => {
     dir = mkdtempSync(join(tmpdir(), 'astro-chart-'));
     const out = join(dir, 'dist');
-    // Built with bun, which every CI job installs, not the runner's node:
-    // Astro 7 asks for node >=22.23.4 and no job pins a node.
-    const built = spawnSync(
-      'bun',
-      [join(FIXTURE, 'node_modules', 'astro', 'bin', 'astro.mjs'), 'build', '--outDir', out],
-      {
-        cwd: FIXTURE,
-        encoding: 'utf8',
-        timeout: 120_000,
-        env: { ...process.env, ASTRO_TELEMETRY_DISABLED: '1' },
-      },
-    );
+    // One build at a time, and why: build-fixture.ts.
+    const built = await buildFixture(out);
     expect(built.status, `${built.stdout}\n${built.stderr}`).toBe(0);
 
     server = createServer((req, res) => {

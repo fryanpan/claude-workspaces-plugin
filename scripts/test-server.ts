@@ -28,8 +28,8 @@
  *
  * SHARDING vs JOBS. `--jobs` splits across processes on THIS machine and is
  * how the wall clock comes down. `--shard i/n` takes a slice of the files and
- * is for splitting across machines. CI uses both: two runners, each taking
- * `--shard i/2` and running it across `--jobs 8`. The shards are balanced on
+ * is for splitting across machines. CI uses both: three runners, each taking
+ * `--shard i/3` and running it across `--jobs 8`. The shards are balanced on
  * the measured times in `scripts/server-durations.json`.
  *
  * COVERAGE. Each CHUNK writes its own lcov — not each worker: bun rewrites
