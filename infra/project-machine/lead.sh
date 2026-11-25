@@ -16,7 +16,16 @@
 # to 50s, so with the 5s check a restart comes within a minute. Six quick
 # ends in a row (each under 5 minutes) mean the session cannot start, and
 # from then on it is tried every 10 minutes. A session that lasted 5 minutes
-# resets the count. Attach to it with (env -i, so root's secrets stay root's):
+# resets the count.
+#
+# Team Lead can restart the session through the org relay: every 30s the
+# supervisor runs lead-restart.ts, which prints `restart` only for a request
+# the relay's own board token delivered onto this lead's inbox doc, naming
+# this lead (CW_LEAD_INBOX_DOC and CW_RELAY_AGENT_ID, set when the relay is
+# installed; without them nothing is checked). The supervisor then ends the
+# session and starts it again at once, with `--continue`, and the restart
+# does not count as a quick end. Attach to it with (env -i, so root's secrets
+# stay root's):
 #
 #   fly ssh console --pty --app cw-<project> -C "env -i TERM=xterm-256color setpriv --reuid=lead --regid=lead --init-groups tmux attach -t lead"
 
@@ -30,6 +39,8 @@ QUICK=300
 CAP=50
 GIVE_UP_AFTER=6
 SLOW_RETRY=600
+# Polls between two restart checks: 6 x 5s.
+RESTART_EVERY=6
 
 log() { echo "[lead] $(date -u +%FT%TZ) $*"; }
 # In the background, so a TERM is handled at once rather than after the sleep.
@@ -82,6 +93,13 @@ deploy_key() {
     "ssh -i $key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes$via" || return 1
 }
 
+# Whether the relay asked for this lead to be restarted (lead-restart.ts).
+# Its errors go to this log; a failed check is never a restart.
+restart_requested() {
+  [ -n "${CW_LEAD_INBOX_DOC:-}" ] && [ -n "${CW_RELAY_AGENT_ID:-}" ] || return 1
+  [ "$(bun "$APP/infra/project-machine/lead-restart.ts")" = restart ]
+}
+
 session() {
   cd "$WORK" || exit 1
   # The deploy key is in its file (deploy_key); the session's tools need
@@ -102,9 +120,11 @@ session() {
 
 supervise() {
   trap 'tmux kill-server 2>/dev/null; exit 0' TERM INT
-  local fails=0 started now delay
+  local fails=0 started now delay polls restarted
   while :; do
     started=$(date +%s)
+    polls=0
+    restarted=0
     # A session left by a supervisor that was killed is kept, not doubled.
     if tmux has-session -t "$SESSION" 2>/dev/null; then
       log "session already running; watching it"
@@ -116,8 +136,21 @@ supervise() {
     else
       log "the session could not be started"
     fi
-    while tmux has-session -t "$SESSION" 2>/dev/null; do pause "$POLL"; done
+    while tmux has-session -t "$SESSION" 2>/dev/null; do
+      pause "$POLL"
+      polls=$((polls + 1))
+      if [ $((polls % RESTART_EVERY)) -eq 0 ] && restart_requested; then
+        log "restart requested through the relay; ending the session"
+        tmux kill-session -t "$SESSION" 2>/dev/null
+        restarted=1
+      fi
+    done
     now=$(date +%s)
+    if [ "$restarted" = 1 ]; then
+      fails=0
+      log "session ended for a requested restart; starting it again"
+      continue
+    fi
     if [ $((now - started)) -ge "$QUICK" ]; then fails=0; fi
     fails=$((fails + 1))
     if [ "$fails" -ge "$GIVE_UP_AFTER" ]; then

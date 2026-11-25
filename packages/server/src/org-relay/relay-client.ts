@@ -142,7 +142,15 @@ export async function readOutbox(
   return out;
 }
 
-/** Open a subject thread on the recipient's inbox doc. True when it landed. */
+/**
+ * Open a subject thread on the recipient's inbox doc, addressed to `agentId`
+ * when one is given. True when it landed.
+ *
+ * The board refuses an address naming an agent it does not list as attached
+ * (`bad_addressee`, `addressees.ts`); that answer delivers again without the
+ * address rather than failing, since an unaddressed comment still reaches
+ * the board's lead and a refused one would be retried forever.
+ */
 export async function deliverToInbox(
   fetchFn: RelayFetch,
   server: RelayServer,
@@ -150,14 +158,26 @@ export async function deliverToInbox(
   doc: string,
   text: string,
   requestId: string,
+  agentId?: string,
 ): Promise<boolean> {
-  try {
-    const res = await call(fetchFn, server, board, `${docPath(doc)}/threads`, {
+  const post = (to: string | undefined) =>
+    call(fetchFn, server, board, `${docPath(doc)}/threads`, {
       method: 'POST',
       // requestId makes a retry after a lost answer land once, not twice.
-      body: { author: RELAY_AUTHOR, text, anchor: { kind: 'subject' }, requestId },
+      body: {
+        author: RELAY_AUTHOR,
+        text,
+        anchor: { kind: 'subject' },
+        requestId,
+        ...(to ? { to: [to] } : {}),
+      },
     });
-    return res.ok;
+  try {
+    const res = await post(agentId);
+    if (res.ok || res.status !== 400 || agentId === undefined) return res.ok;
+    const body = (await res.json().catch(() => null)) as { error?: unknown } | null;
+    if (body?.error !== 'bad_addressee') return false;
+    return (await post(undefined)).ok;
   } catch {
     return false;
   }

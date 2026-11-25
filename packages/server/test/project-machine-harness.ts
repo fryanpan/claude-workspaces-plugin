@@ -149,6 +149,8 @@ case $cmd in
     echo $! > "$state/$name.pid" ;;
   has-session)
     p=$(cat "$state/$2.pid" 2>/dev/null) && kill -0 "$p" 2>/dev/null ;;
+  kill-session)
+    p=$(cat "$state/$2.pid" 2>/dev/null) && kill "$p" 2>/dev/null; exit 0 ;;
   kill-server)
     for f in "$state"/*.pid; do kill "$(cat "$f")" 2>/dev/null; done; exit 0 ;;
 esac`,
