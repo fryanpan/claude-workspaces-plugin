@@ -66,7 +66,7 @@ describe('a cold doc answers a threads read from its index row', () => {
     const writer = store(dataDir);
     for (const id of ['harborlight', 'riverbend', 'saltmarsh']) {
       writer.getOrCreate(id, { type: 'markdown', title: id });
-      expect(writer.setDocContent(id, `# ${id}\n\nRiverbend notes\n`).ok).toBe(true);
+      expect(writer.docEdits.setDocContent(id, `# ${id}\n\nRiverbend notes\n`).ok).toBe(true);
     }
     const open = await writer.createThreadByFind(
       'riverbend',
@@ -82,7 +82,8 @@ describe('a cold doc answers a threads read from its index row', () => {
       'Fixed?',
     );
     expect(done.ok).toBe(true);
-    if (done.ok) expect(writer.resolve('saltmarsh', done.thread.id, REVIEWER)).not.toBeNull();
+    if (done.ok)
+      expect(writer.docThreads.resolve('saltmarsh', done.thread.id, REVIEWER)).not.toBeNull();
     writer.flush();
     writer.stop();
     docStore = store(dataDir);
@@ -187,7 +188,7 @@ describe('a cold doc answers a threads read from its index row', () => {
     // Loaded, its thread resolved, released: the held copy is now stale.
     const [thread] = docStore.listThreads('riverbend', { status: 'open' });
     if (!thread) throw new Error('no open thread');
-    expect(docStore.resolve('riverbend', thread.id, REVIEWER)).not.toBeNull();
+    expect(docStore.docThreads.resolve('riverbend', thread.id, REVIEWER)).not.toBeNull();
     docStore.flush();
     docStore.evictDoc('riverbend');
     expect(docStore.peek('riverbend')).toBeUndefined();
@@ -320,7 +321,9 @@ describe('the timed stall pass decodes nothing inside the synchronous scan', () 
     const task = created.task;
     for (const id of ['board-notes', 'board-quiet']) {
       first.docStore.getOrCreate(id, { type: 'markdown', title: id });
-      expect(first.docStore.setDocContent(id, `# ${id}\n\nHarborlight plan\n`).ok).toBe(true);
+      expect(first.docStore.docEdits.setDocContent(id, `# ${id}\n\nHarborlight plan\n`).ok).toBe(
+        true,
+      );
       first.tasks.attachDoc(ws, id);
     }
     const bodyThread = await first.docStore.createThreadByFind(

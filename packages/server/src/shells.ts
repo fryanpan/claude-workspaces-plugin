@@ -932,16 +932,16 @@ export function buildProjectArtifacts(
 
     // Both from the doc's index row rather than its thread map — same
     // numbers, without decoding every doc this owner has on every render.
-    const openCount = docStore.threadCounts(meta.docId).open;
+    const openCount = docStore.catalog.threadCounts(meta.docId).open;
     // Thread activity, never `meta.lastActivityAt` — see the header note in
     // landing.ts. That field is the `.ydoc` mtime and a snapshot rewrite
     // refreshes it, so it ranks by persistence noise.
-    const lastActivity = docStore.lastThreadActivity(meta.docId);
+    const lastActivity = docStore.catalog.lastThreadActivity(meta.docId);
 
     if (meta.workspaceId) {
       let art = workspaceArtifacts.get(meta.workspaceId);
       if (!art) {
-        const tree = docStore.buildWorkspaceTree(meta.workspaceId);
+        const tree = docStore.workspaces.buildWorkspaceTree(meta.workspaceId);
         const files = flattenWorkspaceFiles(tree.tree);
         // Clicking the workspace opens its entry file directly (the biggest
         // change for a diff review, first file otherwise); expansion is a
@@ -971,7 +971,7 @@ export function buildProjectArtifacts(
       // A diff member marks the whole workspace as a diff review (members can
       // also include plain 'code' context docs — any diff doc wins).
       if (meta.type === 'diff') art.kind = 'diff';
-      art.threadCount += docStore.threadCounts(meta.docId).total;
+      art.threadCount += docStore.catalog.threadCounts(meta.docId).total;
       if (lastActivity > art.lastActivity) art.lastActivity = lastActivity;
       continue;
     }
@@ -983,7 +983,7 @@ export function buildProjectArtifacts(
       id: meta.docId,
       reviewUrl: decorated.reviewUrl,
       openCount,
-      threadCount: docStore.threadCounts(meta.docId).total,
+      threadCount: docStore.catalog.threadCounts(meta.docId).total,
       lastActivity,
     });
   }

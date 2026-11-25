@@ -137,7 +137,7 @@ const SETTLE_MS = 15_000;
 async function settled(docStore: DocStore, docId: string, path: string): Promise<void> {
   await waitForFile(path, (text) => text.includes('Meeting notes'), { timeout: SETTLE_MS });
   try {
-    await waitFor(() => docStore.reconcileNow(docId) === 'in-sync', {
+    await waitFor(() => docStore.bindings.reconcileNow(docId) === 'in-sync', {
       describe: `${docId} write-back bookkeeping to catch up`,
       timeout: SETTLE_MS,
     });
@@ -185,7 +185,7 @@ describe('a bound file that comes back short', () => {
     // The provider hands back the revision it held before the meeting. The
     // doc is clean (the write-back landed), so this is an external change.
     writeFileSync(path, BEFORE);
-    expect(docStore.reconcileNow('d-short')).toBe('apply');
+    expect(docStore.bindings.reconcileNow('d-short')).toBe('apply');
 
     // Disk still wins — that part of the contract is unchanged.
     expect(live(docStore, 'd-short')).not.toContain('Meeting notes');
@@ -204,14 +204,14 @@ describe('a bound file that comes back short', () => {
     takeNotes(docStore, 'd-restore');
     await settled(docStore, 'd-restore', path);
     writeFileSync(path, BEFORE);
-    expect(docStore.reconcileNow('d-restore')).toBe('apply');
+    expect(docStore.bindings.reconcileNow('d-restore')).toBe('apply');
     expect(live(docStore, 'd-restore')).not.toContain('Meeting notes');
 
     // The recovery the syncError names, run end to end.
     const kept = backups(dataDir);
     expect(kept).toHaveLength(1);
     writeFileSync(path, kept[0]);
-    expect(docStore.reparseFromDisk('d-restore').ok).toBe(true);
+    expect(docStore.bindings.reparseFromDisk('d-restore').ok).toBe(true);
     expect(live(docStore, 'd-restore')).toContain(
       'The harbourmaster owns the re-tender, by Friday.',
     );
@@ -226,7 +226,7 @@ describe('a bound file that comes back short', () => {
     // where the notes were. Net zero blocks — the case a count-the-shortfall
     // rule reports nothing for, and the loudest loss there is.
     writeFileSync(path, `${BEFORE}\n${OTHER_SECTION}\n`);
-    expect(docStore.reconcileNow('d-swap')).toBe('apply');
+    expect(docStore.bindings.reconcileNow('d-swap')).toBe('apply');
     expect(live(docStore, 'd-swap')).not.toContain('Meeting notes');
     expect(live(docStore, 'd-swap')).toContain('Site visit');
 
@@ -240,7 +240,7 @@ describe('a bound file that comes back short', () => {
     // No wait: the write-back is still pending, so these words have never
     // been on the file. An agent calls the documented recovery verb.
     takeNotes(docStore, 'd-reparse');
-    expect(docStore.reparseFromDisk('d-reparse').ok).toBe(true);
+    expect(docStore.bindings.reparseFromDisk('d-reparse').ok).toBe(true);
 
     expect(live(docStore, 'd-reparse')).not.toContain('Meeting notes');
     expect(readFileSync(path, 'utf8')).not.toContain('Meeting notes');
@@ -256,7 +256,7 @@ describe('a bound file that comes back short', () => {
     // loss; it must not become a way for that recovery to fail.
     const { docStore, path } = bind('d-declared');
     takeNotes(docStore, 'd-declared');
-    expect(docStore.reparseFromDisk('d-declared')).toEqual({ ok: true });
+    expect(docStore.bindings.reparseFromDisk('d-declared')).toEqual({ ok: true });
     expect(readFileSync(path, 'utf8')).toContain('The slipway is the only item');
   }, 45_000);
 
@@ -276,7 +276,7 @@ describe('a bound file that comes back short', () => {
     takeNotes(docStore, docId);
     await settled(docStore, docId, path);
     writeFileSync(path, BEFORE);
-    expect(docStore.reconcileNow(docId)).toBe('apply');
+    expect(docStore.bindings.reconcileNow(docId)).toBe('apply');
 
     const names = backupNames(dataDir);
     expect(names).toHaveLength(20);
@@ -294,13 +294,13 @@ describe('a bound file that comes back short', () => {
     await settled(docStore, 'd-twice', path);
 
     writeFileSync(path, BEFORE);
-    expect(docStore.reconcileNow('d-twice')).toBe('apply');
+    expect(docStore.bindings.reconcileNow('d-twice')).toBe('apply');
     // The doc is back to BEFORE, so a second round has the same content to
     // keep. Nothing new is worth a second file.
     takeNotes(docStore, 'd-twice');
     await settled(docStore, 'd-twice', path);
     writeFileSync(path, BEFORE);
-    expect(docStore.reconcileNow('d-twice')).toBe('apply');
+    expect(docStore.bindings.reconcileNow('d-twice')).toBe('apply');
 
     expect(backups(dataDir)).toHaveLength(1);
   }, 45_000);
@@ -321,7 +321,7 @@ describe('an ordinary external edit raises no alarm', () => {
         'The slipway and the pontoon were both raised before today.',
       ),
     );
-    expect(docStore.reconcileNow('d-edit')).toBe('apply');
+    expect(docStore.bindings.reconcileNow('d-edit')).toBe('apply');
 
     expect(live(docStore, 'd-edit')).toContain('the pontoon were both raised');
     expect(live(docStore, 'd-edit')).toContain('Meeting notes');
@@ -342,7 +342,7 @@ describe('an ordinary external edit raises no alarm', () => {
     // A new PARAGRAPH: every block the doc held is still there word for word,
     // so nothing was removed and there is nothing to keep.
     writeFileSync(path, `${readFileSync(path, 'utf8')}\nThe pontoon needs a survey.\n`);
-    expect(docStore.reconcileNow('d-add')).toBe('apply');
+    expect(docStore.bindings.reconcileNow('d-add')).toBe('apply');
 
     expect(live(docStore, 'd-add')).toContain('The pontoon needs a survey');
     expect(backups(dataDir)).toHaveLength(0);
@@ -359,7 +359,7 @@ describe('an ordinary external edit raises no alarm', () => {
     await settled(docStore, 'd-bullet', path);
 
     writeFileSync(path, `${readFileSync(path, 'utf8')}- And the pontoon needs a survey.\n`);
-    expect(docStore.reconcileNow('d-bullet')).toBe('apply');
+    expect(docStore.bindings.reconcileNow('d-bullet')).toBe('apply');
 
     expect(live(docStore, 'd-bullet')).toContain('the pontoon needs a survey');
     expect(backups(dataDir)).toHaveLength(0);
@@ -371,7 +371,7 @@ describe('an ordinary external edit raises no alarm', () => {
     takeNotes(docStore, 'd-noop');
     await settled(docStore, 'd-noop', path);
 
-    expect(docStore.reparseFromDisk('d-noop').ok).toBe(true);
+    expect(docStore.bindings.reparseFromDisk('d-noop').ok).toBe(true);
     expect(live(docStore, 'd-noop')).toContain('Meeting notes');
     expect(backups(dataDir)).toHaveLength(0);
     expect(docStore.getSyncError('d-noop')).toBeUndefined();
@@ -386,7 +386,7 @@ describe('keeping a copy does not cost another', () => {
 
     // First the loss, which raises the alarm.
     writeFileSync(path, BEFORE);
-    expect(docStore.reconcileNow('d-stale')).toBe('apply');
+    expect(docStore.bindings.reconcileNow('d-stale')).toBe('apply');
     expect(docStore.getSyncError('d-stale')?.message).toContain('no longer holds');
 
     // Now the doc gets a section again, and a force-pull SWAPS it for another
@@ -396,7 +396,7 @@ describe('keeping a copy does not cost another', () => {
     // the clear sat in an `else` the copy branch skips past.
     takeNotes(docStore, 'd-stale');
     writeFileSync(path, `${BEFORE}\n${OTHER_SECTION}\n`);
-    expect(docStore.reparseFromDisk('d-stale')).toEqual({ ok: true });
+    expect(docStore.bindings.reparseFromDisk('d-stale')).toEqual({ ok: true });
 
     expect(live(docStore, 'd-stale')).toContain('The gate needs a new hinge');
     expect(live(docStore, 'd-stale')).not.toContain('Meeting notes');
@@ -417,9 +417,9 @@ describe('keeping a copy does not cost another', () => {
     try {
       // Two force-pulls, each dropping DIFFERENT words.
       writeFileSync(path, `${BEFORE}\n${OTHER_SECTION}\n`);
-      expect(docStore.reparseFromDisk('d-collide')).toEqual({ ok: true });
+      expect(docStore.bindings.reparseFromDisk('d-collide')).toEqual({ ok: true });
       writeFileSync(path, BEFORE);
-      expect(docStore.reparseFromDisk('d-collide')).toEqual({ ok: true });
+      expect(docStore.bindings.reparseFromDisk('d-collide')).toEqual({ ok: true });
     } finally {
       clock.mockRestore();
     }
@@ -438,7 +438,7 @@ describe('keeping a copy does not cost another', () => {
     takeNotes(docStore, 'd-forget');
     await settled(docStore, 'd-forget', path);
     writeFileSync(path, BEFORE);
-    expect(docStore.reconcileNow('d-forget')).toBe('apply');
+    expect(docStore.bindings.reconcileNow('d-forget')).toBe('apply');
     expect(backups(dataDir)).toHaveLength(1);
     // The re-attach below arbitrates by mtime: the file's stamp in
     // nanoseconds against the `.ydoc`'s, which bun truncates to whole
@@ -465,7 +465,7 @@ describe('keeping a copy does not cost another', () => {
     // test is about. What matters is that the DROP below adds one.
     const beforeSecondDrop = backups(dataDir).length;
     writeFileSync(path, BEFORE);
-    expect(docStore.reconcileNow('d-forget')).toBe('apply');
+    expect(docStore.bindings.reconcileNow('d-forget')).toBe('apply');
 
     expect(backups(dataDir)).toHaveLength(beforeSecondDrop + 1);
   }, 45_000);

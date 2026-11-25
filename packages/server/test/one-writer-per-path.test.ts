@@ -81,7 +81,10 @@ describe('two doc-sets over one path', () => {
 
     // The older set edits: nothing reaches the file, and the doc says so.
     expect(
-      store.findAndReplace('set-august', { find: 'leaves at dawn', replace: 'was cancelled' }).ok,
+      store.docEdits.findAndReplace('set-august', {
+        find: 'leaves at dawn',
+        replace: 'was cancelled',
+      }).ok,
     ).toBe(true);
     // timed: the suspended set's write-back would have landed inside this window.
     await sleep(pastWriteBack());
@@ -91,7 +94,10 @@ describe('two doc-sets over one path', () => {
     // The newer set edits: the file follows it. Same fixture, so this is the
     // control that the write path is live at all.
     expect(
-      store.findAndReplace('set-today', { find: 'leaves at dawn', replace: 'leaves at noon' }).ok,
+      store.docEdits.findAndReplace('set-today', {
+        find: 'leaves at dawn',
+        replace: 'leaves at noon',
+      }).ok,
     ).toBe(true);
     await waitFor(() => readFileSync(path, 'utf8').includes('leaves at noon') || undefined, {
       describe: "the newer set's write-back to reach the file",
@@ -100,7 +106,7 @@ describe('two doc-sets over one path', () => {
 
     // And the suspended set is not left owing a write that a later boot would
     // carry out with nobody around to suspend it again.
-    expect(store.pendingFileWrites().map((p) => p.docId)).not.toContain('set-august');
+    expect(store.bindings.pendingFileWrites().map((p) => p.docId)).not.toContain('set-august');
   });
 
   it('retires the superseded set’s owed write, so a later boot does not carry it out', async () => {
@@ -118,9 +124,12 @@ describe('two doc-sets over one path', () => {
     // Arm its write-back, and make sure it really is armed before the newer
     // set arrives — the state under test is "a flush was already owed".
     expect(
-      store.findAndReplace('owed-august', { find: 'leaves at dawn', replace: 'was cancelled' }).ok,
+      store.docEdits.findAndReplace('owed-august', {
+        find: 'leaves at dawn',
+        replace: 'was cancelled',
+      }).ok,
     ).toBe(true);
-    expect(store.pendingFileWrites().map((p) => p.docId)).toContain('owed-august');
+    expect(store.bindings.pendingFileWrites().map((p) => p.docId)).toContain('owed-august');
     // And on the row a later boot reads, which is the copy that outlives the
     // process. Written by the `.ydoc` persist, which runs ahead of the flush.
     await waitFor(() => readDocIndex(dataDir, 'owed-august')?.pendingFileWrite === true, {
@@ -133,7 +142,7 @@ describe('two doc-sets over one path', () => {
 
     // The owed write is not merely deferred — it is retired, on the row the
     // next boot reads as well as in this process.
-    expect(store.pendingFileWrites().map((p) => p.docId)).not.toContain('owed-august');
+    expect(store.bindings.pendingFileWrites().map((p) => p.docId)).not.toContain('owed-august');
     expect(readDocIndex(dataDir, 'owed-august')?.pendingFileWrite).toBeUndefined();
     // timed: the cancelled flush would have landed inside this window.
     await sleep(pastWriteBack());
@@ -158,7 +167,10 @@ describe('two doc-sets over one path', () => {
 
     // The edit is made WHILE suspended, and stays off the file.
     expect(
-      store.findAndReplace('acc-older', { find: 'leaves at dawn', replace: 'leaves at dusk' }).ok,
+      store.docEdits.findAndReplace('acc-older', {
+        find: 'leaves at dawn',
+        replace: 'leaves at dusk',
+      }).ok,
     ).toBe(true);
     // timed: the suspended set's write-back would have landed inside this window.
     await sleep(pastWriteBack());
@@ -195,7 +207,10 @@ describe('two doc-sets over one path', () => {
     expect(store.boundPathOf('rel-newer')).toBe(elsewhere);
 
     expect(
-      store.findAndReplace('rel-older', { find: 'leaves at dawn', replace: 'leaves at ten' }).ok,
+      store.docEdits.findAndReplace('rel-older', {
+        find: 'leaves at dawn',
+        replace: 'leaves at ten',
+      }).ok,
     ).toBe(true);
     await waitFor(() => readFileSync(path, 'utf8').includes('leaves at ten') || undefined, {
       describe: 'the resumed write-back to reach the file the newer set released',
@@ -212,14 +227,14 @@ describe('two doc-sets over one path', () => {
 
     const olderWriter = store.getOrCreate('settle-writer', { type: 'code', sourceUrl: path });
     olderWriter.meta.createdAt = Date.now() - 14 * 24 * 60 * 60 * 1000;
-    expect(store.attachFlatFile('settle-writer', path, { writeBack: true }).ok).toBe(true);
+    expect(store.bindings.attachFlatFile('settle-writer', path, { writeBack: true }).ok).toBe(true);
     const newerWriter = store.getOrCreate('settle-newer', { type: 'code', sourceUrl: path });
     newerWriter.meta.createdAt = Date.now() - 60 * 1000;
-    expect(store.attachFlatFile('settle-newer', path, { writeBack: true }).ok).toBe(true);
+    expect(store.bindings.attachFlatFile('settle-newer', path, { writeBack: true }).ok).toBe(true);
     // The newest binding of all, and read-only.
     const reader = store.getOrCreate('settle-reader', { type: 'code', sourceUrl: path });
     reader.meta.createdAt = Date.now();
-    expect(store.attachFlatFile('settle-reader', path).ok).toBe(true);
+    expect(store.bindings.attachFlatFile('settle-reader', path).ok).toBe(true);
 
     // The writer that owned the path goes; the older writer must get it.
     expect(store.evictDoc('settle-newer')).toBe(true);
@@ -241,11 +256,11 @@ describe('two doc-sets over one path', () => {
     // same member — and it hydrates FIRST, which is the order that decides it.
     const reader = store.getOrCreate('member-reader', { type: 'code', sourceUrl: path });
     reader.meta.createdAt = Date.now();
-    expect(store.attachFlatFile('member-reader', path).ok).toBe(true);
+    expect(store.bindings.attachFlatFile('member-reader', path).ok).toBe(true);
 
     const writer = store.getOrCreate('member-writer', { type: 'code', sourceUrl: path });
     writer.meta.createdAt = Date.now() - 60 * 60 * 1000;
-    expect(store.attachFlatFile('member-writer', path, { writeBack: true }).ok).toBe(true);
+    expect(store.bindings.attachFlatFile('member-writer', path, { writeBack: true }).ok).toBe(true);
 
     expect(store.getSyncError('member-writer')?.message ?? '').not.toContain('newer doc');
     const content = store.get('member-writer')?.ydoc.getText('content');
@@ -272,8 +287,10 @@ describe('two doc-sets over one path', () => {
     // takes edits and writes none of them.
     expect(store.evictDoc('set-newer')).toBe(true);
     expect(
-      store.findAndReplace('set-older', { find: 'leaves at dawn', replace: 'leaves at midnight' })
-        .ok,
+      store.docEdits.findAndReplace('set-older', {
+        find: 'leaves at dawn',
+        replace: 'leaves at midnight',
+      }).ok,
     ).toBe(true);
     await waitFor(() => readFileSync(path, 'utf8').includes('leaves at midnight') || undefined, {
       describe: 'the resumed write-back to reach the file',

@@ -75,7 +75,9 @@ describe('suggestions vs disk and hydration', () => {
       t.insert('Alpha beta'.length, ' delta', { [SUGGEST_INSERT_MARK]: sattrs('rp') });
     }, 'agent');
     // An accepted edit alongside, so the write-back definitely fires.
-    expect(docStore.findAndReplace('s1', { find: 'gamma', replace: 'omega' }).ok).toBe(true);
+    expect(docStore.docEdits.findAndReplace('s1', { find: 'gamma', replace: 'omega' }).ok).toBe(
+      true,
+    );
     // The accepted edit is the positive observable; once it is on disk, the
     // same write either carried the proposal out or never will.
     const onDisk = await waitForFile(path, (t) => t.includes('omega'));

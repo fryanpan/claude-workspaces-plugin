@@ -85,7 +85,8 @@ describe('a write that leaves literal markdown in the doc reports a syncError', 
 
   it('leaves an ordinary edit unreported', () => {
     expect(
-      rooms.findAndReplace('d1', { find: 'Intro paragraph.', replace: 'Rewritten intro.' }).ok,
+      rooms.docEdits.findAndReplace('d1', { find: 'Intro paragraph.', replace: 'Rewritten intro.' })
+        .ok,
     ).toBe(true);
     expect(rooms.literalMarkdownSyncError('d1')).toBeUndefined();
   });

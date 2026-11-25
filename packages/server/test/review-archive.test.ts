@@ -62,7 +62,7 @@ function backfilledStream(dataDir: string): string {
   return existsSync(p) ? readFileSync(p, 'utf8') : '';
 }
 
-describe('DocStore.archiveReview / unarchiveReview', () => {
+describe('DocStore.workspaces.archiveReview / unarchiveReview', () => {
   let dataDir: string;
   let folder: string;
   let docStore: DocStore;
@@ -82,7 +82,7 @@ describe('DocStore.archiveReview / unarchiveReview', () => {
   });
 
   it('returns not-found for an id no review is bound under', () => {
-    const res = docStore.archiveReview('nope', { archivedBy: 'Tester' });
+    const res = docStore.workspaces.archiveReview('nope', { archivedBy: 'Tester' });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toBe('not-found');
   });
@@ -97,7 +97,7 @@ describe('DocStore.archiveReview / unarchiveReview', () => {
       'still unresolved',
     );
 
-    const res = docStore.archiveReview(bound.setId, {
+    const res = docStore.workspaces.archiveReview(bound.setId, {
       archivedBy: 'Tester',
       reason: 'merged in #123',
     });
@@ -119,7 +119,7 @@ describe('DocStore.archiveReview / unarchiveReview', () => {
     await settle();
     const sidecars = bound.docIds.filter((id) => existsSync(join(dataDir, `${id}.private.json`)));
     expect(sidecars.length).toBeGreaterThan(0);
-    expect(docStore.archiveReview(bound.setId, { archivedBy: 'Tester' }).ok).toBe(true);
+    expect(docStore.workspaces.archiveReview(bound.setId, { archivedBy: 'Tester' }).ok).toBe(true);
     for (const id of sidecars) {
       expect(existsSync(join(dataDir, `${id}.private.json`))).toBe(false);
       expect(existsSync(join(dataDir, '_archive', `${id}.private.json`))).toBe(true);
@@ -128,7 +128,10 @@ describe('DocStore.archiveReview / unarchiveReview', () => {
 
   it('records who archived it and why, and lists it as archived', async () => {
     const bound = await bindAllFiles(docStore, folder);
-    docStore.archiveReview(bound.setId, { archivedBy: 'Tester', reason: 'merged in #123' });
+    docStore.workspaces.archiveReview(bound.setId, {
+      archivedBy: 'Tester',
+      reason: 'merged in #123',
+    });
 
     const manifest = readArchiveManifest(dataDir, bound.setId);
     expect(manifest).toBeTruthy();
@@ -143,7 +146,10 @@ describe('DocStore.archiveReview / unarchiveReview', () => {
 
   it('appends an archive event to the activity log', async () => {
     const bound = await bindAllFiles(docStore, folder);
-    docStore.archiveReview(bound.setId, { archivedBy: 'Tester', reason: 'merged in #123' });
+    docStore.workspaces.archiveReview(bound.setId, {
+      archivedBy: 'Tester',
+      reason: 'merged in #123',
+    });
     const log = readFileSync(join(dataDir, 'activity.jsonl'), 'utf8');
     const archiveRows = log
       .split('\n')
@@ -168,9 +174,9 @@ describe('DocStore.archiveReview / unarchiveReview', () => {
       REVIEWER,
       'still unresolved',
     );
-    expect(docStore.archiveReview(bound.setId, { archivedBy: 'Tester' }).ok).toBe(true);
+    expect(docStore.workspaces.archiveReview(bound.setId, { archivedBy: 'Tester' }).ok).toBe(true);
 
-    const back = docStore.unarchiveReview(bound.setId, { archivedBy: 'Tester' });
+    const back = docStore.workspaces.unarchiveReview(bound.setId, { archivedBy: 'Tester' });
     expect(back.ok).toBe(true);
     if (!back.ok) return;
     expect(back.restored).toBe(bound.docIds.length);
@@ -188,7 +194,7 @@ describe('DocStore.archiveReview / unarchiveReview', () => {
   });
 
   it('unarchive of an id that was never archived is not-found', () => {
-    const res = docStore.unarchiveReview('nope', { archivedBy: 'Tester' });
+    const res = docStore.workspaces.unarchiveReview('nope', { archivedBy: 'Tester' });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toBe('not-found');
   });
@@ -203,7 +209,7 @@ describe('DocStore.archiveReview / unarchiveReview', () => {
     writeFileSync(join(dataDir, '_archive', `${mdDocId}.ydoc`), 'older-snapshot');
     await settle();
 
-    const res = docStore.archiveReview(bound.setId, { archivedBy: 'Tester' });
+    const res = docStore.workspaces.archiveReview(bound.setId, { archivedBy: 'Tester' });
     expect(res.ok).toBe(false);
     if (res.ok) return;
     expect(res.error).toBe('archive-collision');
@@ -219,12 +225,12 @@ describe('DocStore.archiveReview / unarchiveReview', () => {
 
   it('refuses to unarchive onto a live doc of the same id', async () => {
     const bound = await bindAllFiles(docStore, folder);
-    docStore.archiveReview(bound.setId, { archivedBy: 'Tester' });
+    docStore.workspaces.archiveReview(bound.setId, { archivedBy: 'Tester' });
     // Something re-minted one of the ids while the review was archived.
     const revived = bound.docIds[0]!;
     writeFileSync(join(dataDir, `${revived}.ydoc`), 'live-again');
 
-    const res = docStore.unarchiveReview(bound.setId, { archivedBy: 'Tester' });
+    const res = docStore.workspaces.unarchiveReview(bound.setId, { archivedBy: 'Tester' });
     expect(res.ok).toBe(false);
     if (res.ok) return;
     expect(res.error).toBe('restore-collision');
@@ -276,7 +282,7 @@ describe('archived docs keep feeding activity-backfill', () => {
     // move into _archive threatens: readPrivateMeta looks NEXT TO the .ydoc.
     expect(before).toContain('"producedBy"');
 
-    expect(docStore.archiveReview(bound.setId, { archivedBy: 'Tester' }).ok).toBe(true);
+    expect(docStore.workspaces.archiveReview(bound.setId, { archivedBy: 'Tester' }).ok).toBe(true);
 
     const after = backfilledStream(dataDir);
     expect(after).toBe(before);
@@ -299,7 +305,7 @@ describe('archived docs keep feeding activity-backfill', () => {
     expect(before).toContain('"producedBy"');
 
     // Hand-move: the ydoc goes, the sidecar stays.
-    docStore.archiveReview(bound.setId, { archivedBy: 'Tester' });
+    docStore.workspaces.archiveReview(bound.setId, { archivedBy: 'Tester' });
     const archivedSidecar = join(dataDir, '_archive', `${mdDocId}.private.json`);
     if (existsSync(archivedSidecar)) {
       writeFileSync(join(dataDir, `${mdDocId}.private.json`), readFileSync(archivedSidecar));

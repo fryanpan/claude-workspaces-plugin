@@ -46,7 +46,7 @@ describe('a mockup doc hydrated off the main thread', () => {
     writeFileSync(htmlPath, '<main>Checkout, step one</main>\n');
     const first = newStore(dataDir);
     first.getOrCreate(DOC_ID, { type: 'mockup', sourceUrl: htmlPath });
-    expect(first.attachMockupFile(DOC_ID, htmlPath).ok).toBe(true);
+    expect(first.bindings.attachMockupFile(DOC_ID, htmlPath).ok).toBe(true);
     first.flush();
     first.stop();
   });

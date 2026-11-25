@@ -128,7 +128,7 @@ export async function seedReviewQueueFixture(
     for (let d = 0; d < shape.docsPerBoard; d++) {
       const docId = `${name.toLowerCase()}-notes-${d}`;
       h.docStore.getOrCreate(docId, { type: 'markdown', title: `${name} notes ${d}` });
-      h.docStore.setDocContent(docId, `# Notes\n\n${name} plan ${d}\n`);
+      h.docStore.docEdits.setDocContent(docId, `# Notes\n\n${name} plan ${d}\n`);
       t.attachDoc(ws, docId);
       boardDoc[name] ??= docId;
       const th = await h.docStore.createThreadByFind(

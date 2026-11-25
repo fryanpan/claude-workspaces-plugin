@@ -78,11 +78,11 @@ describe('a doc edited while its deferred bind is in flight', () => {
     // this assertion is the seam the test turns on. Everything below happens
     // in the gap, deterministically, because a pool read cannot land in the
     // same synchronous run.
-    const list = second.listSuggestions('db1');
+    const list = second.docSuggests.listSuggestions('db1');
     expect(list).toHaveLength(1);
     expect(second.boundPathOf('db1')).toBeUndefined();
 
-    expect(second.acceptSuggestion('db1', created.suggestionId)).toEqual({ ok: true });
+    expect(second.docSuggests.acceptSuggestion('db1', created.suggestionId)).toEqual({ ok: true });
 
     // Now let the bind land. Before the fix it applied the file's "beta" over
     // the accepted "delta" and reported the suggestion as dropped.
@@ -90,7 +90,7 @@ describe('a doc edited while its deferred bind is in flight', () => {
       describe: 'the deferred bind to land',
     });
     expect(second.getSyncError('db1')).toBeUndefined();
-    expect(second.listSuggestions('db1')).toHaveLength(0);
+    expect(second.docSuggests.listSuggestions('db1')).toHaveLength(0);
     const disk = await waitFor(
       () => {
         const text = readFileSync(mdPath, 'utf8');
@@ -112,7 +112,7 @@ describe('a doc edited while its deferred bind is in flight', () => {
 
     second = makeDocStore(dataDir);
     // Reaching for the doc is what hydrates it and starts the pool read.
-    expect(second.listSuggestions('db1')).toHaveLength(0);
+    expect(second.docSuggests.listSuggestions('db1')).toHaveLength(0);
     expect(second.boundPathOf('db1')).toBeUndefined();
     await waitFor(() => second?.boundPathOf('db1') === mdPath, {
       describe: 'the deferred bind to land',
@@ -132,7 +132,7 @@ describe('a doc edited while its deferred bind is in flight', () => {
     first.stop();
 
     second = makeDocStore(dataDir);
-    expect(second.listSuggestions('db1')).toHaveLength(0);
+    expect(second.docSuggests.listSuggestions('db1')).toHaveLength(0);
     expect(second.boundPathOf('db1')).toBeUndefined();
     // The read is in flight. Stopping here is what a shutdown — or a test's
     // teardown — does, and the landing must not re-hydrate the doc or

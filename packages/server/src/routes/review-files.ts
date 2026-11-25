@@ -127,7 +127,7 @@ export async function handleReviewFileRoutes(
       return j(404, { error: 'review not found', setId, workspaceId: setId });
     }
     const status = url.searchParams.get('status') as 'open' | 'resolved' | null;
-    const threads = docStore
+    const threads = docStore.workspaces
       .listWorkspaceThreads(setId, status ? { status } : undefined)
       .map((t) => withTaskChips(t.docId, t));
     // `workspaceId` carries the SAME value and is deprecated for one
@@ -238,7 +238,7 @@ export async function handleReviewFileRoutes(
   const wsTreeMatch = matchRest(scope, REVIEW_REST.tree);
   if (wsTreeMatch && req.method === 'GET') {
     const setId = decodeURIComponent(wsTreeMatch[1] ?? '');
-    const tree = docStore.buildWorkspaceTree(setId);
+    const tree = docStore.workspaces.buildWorkspaceTree(setId);
     if (tree.tree.children.length === 0) {
       return j(404, { error: 'review not found', setId, workspaceId: setId });
     }

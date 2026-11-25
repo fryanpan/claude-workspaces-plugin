@@ -154,8 +154,9 @@ block, so the next idle block says which of GC, page-in or descheduling it was.
 `doc-*.ts` already draws it. It is what `DocStore` answers about a doc without
 opening it — the listing rows, the alias table and the `.ydoc` mtimes a listing
 reports as activity — moved out of `doc-store.ts` whole, behind a host of
-thunks like the other collaborators. `DocStore` keeps `list`, `threadCounts`
-and the rest as one-line forwarders, so no caller changed.
+thunks like the other collaborators. Callers reach it as `docStore.catalog`;
+`DocStore.list` stays as a forwarder because the narrow ports that read a
+listing name it.
 
 `doc-activity-recorder.ts` joins the doc-store group and moves no boundary. It
 is what readers and writers did, written to `activity.jsonl` — the comment,

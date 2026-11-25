@@ -70,7 +70,7 @@ describe('doc-store suggestion operations', () => {
     await sleep(pastWriteBack());
     expect(readFileSync(path, 'utf8')).toBe(MD);
 
-    const list = docStore.listSuggestions('sg1');
+    const list = docStore.docSuggests.listSuggestions('sg1');
     expect(list).toHaveLength(1);
     expect(list[0]!.sid).toBe(created.suggestionId);
     expect(list[0]!.kind).toBe('replace');
@@ -78,7 +78,9 @@ describe('doc-store suggestion operations', () => {
 
     // Accept → the change becomes real and the normal debounced write-back
     // carries it to disk (assert the FILE, not just the doc).
-    expect(docStore.acceptSuggestion('sg1', created.suggestionId)).toEqual({ ok: true });
+    expect(docStore.docSuggests.acceptSuggestion('sg1', created.suggestionId)).toEqual({
+      ok: true,
+    });
     let disk = '';
     for (let i = 0; i < 40; i++) {
       disk = readFileSync(path, 'utf8');
@@ -86,14 +88,16 @@ describe('doc-store suggestion operations', () => {
       await sleep(50);
     }
     expect(disk).toBe('# Title\n\nAlpha delta gamma.\n\nSecond paragraph here.\n');
-    expect(docStore.listSuggestions('sg1')).toHaveLength(0);
+    expect(docStore.docSuggests.listSuggestions('sg1')).toHaveLength(0);
   });
 
   it('reject restores exactly the pre-suggestion text, in the doc and on disk', async () => {
     const created = docStore.createSuggestion('sg1', { find: 'beta', replace: 'delta', author });
     expect(created.ok).toBe(true);
     if (!created.ok) return;
-    expect(docStore.rejectSuggestion('sg1', created.suggestionId)).toEqual({ ok: true });
+    expect(docStore.docSuggests.rejectSuggestion('sg1', created.suggestionId)).toEqual({
+      ok: true,
+    });
     const ydoc = docStore.get('sg1')!.ydoc;
     expect(serializeFragmentToMarkdown(getProseFragment(ydoc))).toBe(MD);
     // No residual marks in the live doc either.
@@ -102,28 +106,36 @@ describe('doc-store suggestion operations', () => {
     // window in which a write-back could have carried it out.
     await sleep(pastWriteBack());
     expect(readFileSync(path, 'utf8')).toBe(MD);
-    expect(docStore.listSuggestions('sg1')).toHaveLength(0);
+    expect(docStore.docSuggests.listSuggestions('sg1')).toHaveLength(0);
   });
 
   it('double accept: the second caller gets not-found (the race is idempotent)', () => {
     const created = docStore.createSuggestion('sg1', { find: 'beta', replace: 'delta', author });
     expect(created.ok).toBe(true);
     if (!created.ok) return;
-    expect(docStore.acceptSuggestion('sg1', created.suggestionId)).toEqual({ ok: true });
-    expect(docStore.acceptSuggestion('sg1', created.suggestionId)).toEqual({
+    expect(docStore.docSuggests.acceptSuggestion('sg1', created.suggestionId)).toEqual({
+      ok: true,
+    });
+    expect(docStore.docSuggests.acceptSuggestion('sg1', created.suggestionId)).toEqual({
       ok: false,
       error: 'not-found',
     });
-    expect(docStore.rejectSuggestion('sg1', created.suggestionId)).toEqual({
+    expect(docStore.docSuggests.rejectSuggestion('sg1', created.suggestionId)).toEqual({
       ok: false,
       error: 'not-found',
     });
   });
 
   it('unknown doc → not-found / empty list', async () => {
-    expect(docStore.acceptSuggestion('nope', 'x')).toEqual({ ok: false, error: 'not-found' });
-    expect(docStore.rejectSuggestion('nope', 'x')).toEqual({ ok: false, error: 'not-found' });
-    expect(docStore.listSuggestions('nope')).toEqual([]);
+    expect(docStore.docSuggests.acceptSuggestion('nope', 'x')).toEqual({
+      ok: false,
+      error: 'not-found',
+    });
+    expect(docStore.docSuggests.rejectSuggestion('nope', 'x')).toEqual({
+      ok: false,
+      error: 'not-found',
+    });
+    expect(docStore.docSuggests.listSuggestions('nope')).toEqual([]);
     const created = docStore.createSuggestion('nope', { find: 'a', replace: 'b', author });
     expect(created.ok).toBe(false);
     expect(await docStore.resolveAllSuggestions('nope', { action: 'accept' })).toEqual({
@@ -173,13 +185,15 @@ describe('doc-store suggestion operations', () => {
 
     const plain = walkProse(getProseFragment(serverDoc)).plainText;
     expect(plain).toContain('HUMAN');
-    const list = docStore.listSuggestions('sg1');
+    const list = docStore.docSuggests.listSuggestions('sg1');
     expect(list).toHaveLength(1);
     expect(list[0]!.sid).toBe(created.suggestionId);
 
     // Accept after the merge: both the human edit and the accepted
     // replacement land on disk.
-    expect(docStore.acceptSuggestion('sg1', created.suggestionId)).toEqual({ ok: true });
+    expect(docStore.docSuggests.acceptSuggestion('sg1', created.suggestionId)).toEqual({
+      ok: true,
+    });
     let disk = '';
     for (let i = 0; i < 40; i++) {
       disk = readFileSync(path, 'utf8');
@@ -195,7 +209,9 @@ describe('doc-store suggestion operations', () => {
     const created = docStore.createSuggestion('sg1', { find: 'beta', replace: 'delta', author });
     expect(created.ok).toBe(true);
     if (!created.ok) return;
-    expect(docStore.acceptSuggestion('sg1', created.suggestionId)).toEqual({ ok: true });
+    expect(docStore.docSuggests.acceptSuggestion('sg1', created.suggestionId)).toEqual({
+      ok: true,
+    });
     expect(um.undoStack.length).toBe(0); // Cmd-Z would revert NOTHING of the agent's
     // Sanity contrast: an origin-less (human-shaped) edit IS tracked.
     const para = getProseFragment(ydoc).get(1) as Y.XmlElement;
@@ -213,12 +229,14 @@ describe('doc-store suggestion operations', () => {
     docStore.flush();
 
     const docStore2 = makeDocStore(dataDir);
-    const list = docStore2.listSuggestions('sg1');
+    const list = docStore2.docSuggests.listSuggestions('sg1');
     expect(list).toHaveLength(1);
     expect(list[0]!.sid).toBe(created.suggestionId);
     expect(list[0]!.kind).toBe('replace');
     // The hydrated proposal is still actionable.
-    expect(docStore2.acceptSuggestion('sg1', created.suggestionId)).toEqual({ ok: true });
+    expect(docStore2.docSuggests.acceptSuggestion('sg1', created.suggestionId)).toEqual({
+      ok: true,
+    });
     let disk = '';
     for (let i = 0; i < 40; i++) {
       disk = readFileSync(path, 'utf8');
@@ -245,11 +263,11 @@ describe('doc-store suggestion operations', () => {
     // External tool rewrites ONLY the first paragraph.
     writeFileSync(path, '# Title\n\nAlpha rewritten completely.\n\nSecond paragraph here.\n');
     bumpMtime(path);
-    expect(docStore.reconcileNow('sg1')).toBe('apply');
+    expect(docStore.bindings.reconcileNow('sg1')).toBe('apply');
 
     // The suggestion inside the rewritten block is gone; the one in the
     // untouched block keeps its Y.XmlText identity and survives.
-    const list = docStore.listSuggestions('sg1');
+    const list = docStore.docSuggests.listSuggestions('sg1');
     expect(list).toHaveLength(1);
     expect(list[0]!.sid).toBe(survivor.suggestionId);
 
@@ -263,9 +281,11 @@ describe('doc-store suggestion operations', () => {
     // A later clean reconcile clears the note.
     writeFileSync(path, readFileSync(path, 'utf8'));
     bumpMtime(path);
-    docStore.reconcileNow('sg1');
+    docStore.bindings.reconcileNow('sg1');
     // (in-sync/catch-up leaves the note; only the next successful APPLY with
     // no drops clears it — assert the survivor is still operable either way)
-    expect(docStore.acceptSuggestion('sg1', survivor.suggestionId)).toEqual({ ok: true });
+    expect(docStore.docSuggests.acceptSuggestion('sg1', survivor.suggestionId)).toEqual({
+      ok: true,
+    });
   });
 });

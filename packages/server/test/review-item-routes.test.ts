@@ -943,9 +943,15 @@ describe('undo respects the visitor gate — a share visitor cannot spend the AP
     expect(typeof afterAnswer).toBe('number');
 
     // The visitor gate, exactly as the route passes it (`generate: !visitor`).
-    const gated = gatedHandle.docStore.undoReviewItemAnswer(docId, thread.id, commentId, PERSON, {
-      generate: false,
-    });
+    const gated = gatedHandle.docStore.docThreads.undoReviewItemAnswer(
+      docId,
+      thread.id,
+      commentId,
+      PERSON,
+      {
+        generate: false,
+      },
+    );
     expect(gated.ok).toBe(true);
     expect(markerOf(docId, thread.id)).toBe(afterAnswer);
 
@@ -968,7 +974,12 @@ describe('undo respects the visitor gate — a share visitor cannot spend the AP
     const afterReAnswer = markerOf(docId, thread.id);
     expect(typeof afterReAnswer).toBe('number');
     await new Promise((r) => setTimeout(r, 2));
-    const ungated = gatedHandle.docStore.undoReviewItemAnswer(docId, thread.id, commentId, PERSON);
+    const ungated = gatedHandle.docStore.docThreads.undoReviewItemAnswer(
+      docId,
+      thread.id,
+      commentId,
+      PERSON,
+    );
     expect(ungated.ok).toBe(true);
     expect(markerOf(docId, thread.id)).not.toBe(afterReAnswer);
   });

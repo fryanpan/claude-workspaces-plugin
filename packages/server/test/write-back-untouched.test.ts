@@ -99,7 +99,7 @@ describe('untouched blocks keep their bytes, whoever changed the doc', () => {
       await sleep(pastWriteBack());
       expectNoWrite(path, text);
 
-      expect(second.reparseFromDisk(name).ok).toBe(true);
+      expect(second.bindings.reparseFromDisk(name).ok).toBe(true);
       // timed: a reparse-triggered write-back would have landed inside this window.
       await sleep(pastWriteBack());
       expectNoWrite(path, text);
@@ -109,7 +109,7 @@ describe('untouched blocks keep their bytes, whoever changed the doc', () => {
       const [find, replace] = name.endsWith('.mdx')
         ? ['opens at dawn', 'opens at first light']
         : ['runs hourly', 'runs every half hour'];
-      expect(second.findAndReplace(name, { find, replace }).ok).toBe(true);
+      expect(second.docEdits.findAndReplace(name, { find, replace }).ok).toBe(true);
       await waitForFileToBe(path, text.replace(find, replace));
       expect(statSync(path).mtimeMs).not.toBe(OLD.getTime());
     });

@@ -147,7 +147,7 @@ describe('.mdx components are blocks of their own source', () => {
     docStore.getOrCreate('post.mdx', { type: 'markdown', sourceUrl: path });
     expect((await docStore.attachFileAsync('post.mdx', path)).ok).toBe(true);
     expect(
-      docStore.findAndReplace('post.mdx', { find: 'all year', replace: 'every month' }).ok,
+      docStore.docEdits.findAndReplace('post.mdx', { find: 'all year', replace: 'every month' }).ok,
     ).toBe(true);
     await waitForFileToBe(path, POST.replace('all year', 'every month'));
   });
@@ -156,7 +156,9 @@ describe('.mdx components are blocks of their own source', () => {
     const path = writeOld('post.mdx', POST);
     docStore.getOrCreate('post.mdx', { type: 'markdown', sourceUrl: path });
     expect((await docStore.attachFileAsync('post.mdx', path)).ok).toBe(true);
-    expect(docStore.findAndReplace('post.mdx', { find: '21:30', replace: '22:00' }).ok).toBe(true);
+    expect(
+      docStore.docEdits.findAndReplace('post.mdx', { find: '21:30', replace: '22:00' }).ok,
+    ).toBe(true);
     await waitForFileToBe(path, POST.replace('21:30', '22:00'));
   });
 
@@ -237,7 +239,7 @@ describe('.mdx components are blocks of their own source', () => {
     docStore.getOrCreate('post.mdx', { type: 'markdown', sourceUrl: path });
     expect((await docStore.attachFileAsync('post.mdx', path)).ok).toBe(true);
     const next = POST.replace('all year', 'every month');
-    expect(docStore.setDocContent('post.mdx', next).ok).toBe(true);
+    expect(docStore.docEdits.setDocContent('post.mdx', next).ok).toBe(true);
     expect(blocksOf('post.mdx')).toContain(CHART);
     await waitForFileToBe(path, next);
   });
@@ -247,7 +249,7 @@ describe('.mdx components are blocks of their own source', () => {
     docStore.getOrCreate('post.mdx', { type: 'markdown', sourceUrl: path });
     expect((await docStore.attachFileAsync('post.mdx', path)).ok).toBe(true);
     const before = statSync(path).mtimeMs;
-    expect(docStore.reparseFromDisk('post.mdx').ok).toBe(true);
+    expect(docStore.bindings.reparseFromDisk('post.mdx').ok).toBe(true);
     expect(blocksOf('post.mdx')).toContain(CHART);
     // timed: proving the write-back never fires, so nothing to poll for.
     await sleep(pastWriteBack());
@@ -273,7 +275,7 @@ describe('.mdx components are blocks of their own source', () => {
     });
 
     expect(
-      docStore.findAndReplace('post.mdx', { find: 'all year', replace: 'every month' }).ok,
+      docStore.docEdits.findAndReplace('post.mdx', { find: 'all year', replace: 'every month' }).ok,
     ).toBe(true);
     await waitForFileToBe(path, POST.replace('all year', 'every month'));
 

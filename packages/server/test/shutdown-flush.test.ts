@@ -122,7 +122,7 @@ describe('shutdown flush of doc save timers', () => {
     handle.docStore.getOrCreate('bound-doc', { type: 'markdown' });
     const attached = handle.docStore.attachFile('bound-doc', mdPath);
     expect(attached.ok).toBe(true);
-    const set = handle.docStore.setDocContent(
+    const set = handle.docStore.docEdits.setDocContent(
       'bound-doc',
       '# Title\n\nEdited just before shutdown.\n',
     );

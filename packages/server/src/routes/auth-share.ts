@@ -1205,7 +1205,7 @@ export async function handleAuthShareRoutes(
     // Exactly this membership. Someone ejected from one board may still hold
     // another, and their connections to that one must survive.
     const key = shareMemberKey(workspaceId, email);
-    const closedSockets = docStore.closeSocketsForShareMembers((k) => k === key);
+    const closedSockets = docStore.fanout.closeSocketsForShareMembers((k) => k === key);
     const closedStreams = sse.closeForShareMembers((k) => k === key);
     return j(200, { ok: true, closedSockets, closedStreams });
   }
@@ -1244,7 +1244,8 @@ export async function handleAuthShareRoutes(
       // Somebody a second live share still names keeps theirs.
       const ended = collabMembershipEnded(collabMemberOf);
       const closed = result.ok
-        ? docStore.closeSocketsForShare(shareId) + docStore.closeSocketsForShareMembers(ended)
+        ? docStore.fanout.closeSocketsForShare(shareId) +
+          docStore.fanout.closeSocketsForShareMembers(ended)
         : 0;
       // The SSE stream has the same "authorized once, then long-lived"
       // shape: a visitor with the review page still open would otherwise

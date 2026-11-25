@@ -319,12 +319,12 @@ describe('the dry run behind the guard', () => {
         webhooks: createWebhookDispatcher({ onLog: () => {} }),
       });
       docStore.getOrCreate('d1', { type: 'markdown' });
-      docStore.setDocContent('d1', '# Doc\n\nHarborlight body.\n');
+      docStore.docEdits.setDocContent('d1', '# Doc\n\nHarborlight body.\n');
       // A person's edit inside the window, with no block stamps: the dry run
       // runs, finds no stamped block, and the edit lands.
       docStore.noteHumanEdit('d1', Date.now() - 1_000);
-      const res = docStore.guardScopedEdit('d1', {}, () =>
-        docStore.findAndReplace('d1', { find: 'Harborlight', replace: 'Riverbend' }),
+      const res = docStore.docEdits.guardScopedEdit('d1', {}, () =>
+        docStore.docEdits.findAndReplace('d1', { find: 'Harborlight', replace: 'Riverbend' }),
       );
       expect(res.ok).toBe(true);
       const live = docStore.get('d1');

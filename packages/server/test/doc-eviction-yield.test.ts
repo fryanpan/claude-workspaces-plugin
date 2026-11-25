@@ -137,7 +137,10 @@ describe('the idle sweep yields between docs', () => {
     const slice = scriptedSlice((n) => {
       if (n === 1) {
         expect(
-          docStore.findAndReplace('riverbend', { find: 'Harborlight notes', replace: 'edited' }).ok,
+          docStore.docEdits.findAndReplace('riverbend', {
+            find: 'Harborlight notes',
+            replace: 'edited',
+          }).ok,
         ).toBe(true);
       }
     });

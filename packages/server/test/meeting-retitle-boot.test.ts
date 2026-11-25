@@ -40,7 +40,7 @@ function seedLegacyDocs(): void {
     webhooks: createWebhookDispatcher({ onLog: () => {} }),
   });
   store.getOrCreate('d-talk', { type: 'markdown', title: TALK, huddle: true });
-  store.setDocContent(
+  store.docEdits.setDocContent(
     'd-talk',
     '## Meeting notes\n\n- The permit office wants the revised tide study\n',
   );

@@ -159,7 +159,7 @@ export function wireMeetings(deps: MeetingWiringDeps) {
       postComment: (docId, threadId, author, text, anchor, o) =>
         late.docStore().postComment(docId, threadId, author, text, anchor, o),
       editCommentText: (docId, threadId, commentId, text, o) =>
-        late.docStore().editCommentText(docId, threadId, commentId, text, o),
+        late.docStore().docThreads.editCommentText(docId, threadId, commentId, text, o),
     },
     ...(opts.voiceKeepGraceMs !== undefined ? { keepGraceMs: opts.voiceKeepGraceMs } : {}),
     log: (line) => console.log(line),
@@ -220,7 +220,7 @@ export function wireMeetings(deps: MeetingWiringDeps) {
             reviseReviewItem: (taskId, itemId, patch, o) =>
               late.taskStore().reviseReviewItem(taskId, itemId, patch, o),
             reviseOnDoc: (docId, threadId, commentId, patch, actor) =>
-              late.docStore().reviseCommentReview(docId, threadId, commentId, patch, {
+              late.docStore().docThreads.reviseCommentReview(docId, threadId, commentId, patch, {
                 // Only the NAME reaches the revision stamp; the rest is the
                 // `User` shape the doc side takes.
                 actor: {
@@ -238,7 +238,7 @@ export function wireMeetings(deps: MeetingWiringDeps) {
             withdrawReviewItem: (taskId, itemId, o) =>
               late.taskStore().withdrawReviewItem(taskId, itemId, o),
             withdrawOnDoc: (docId, threadId, commentId, reason, actor) =>
-              late.docStore().withdrawCommentReview(docId, threadId, commentId, {
+              late.docStore().docThreads.withdrawCommentReview(docId, threadId, commentId, {
                 actor: {
                   id: actor.id,
                   name: actor.name,

@@ -92,7 +92,7 @@ describe('a parked doc edited, then evicted', () => {
       describe: 'the doc to park on its quarantined file',
     });
 
-    const cut = live.deleteBlocksInRange(DOC_ID, {
+    const cut = live.docEdits.deleteBlocksInRange(DOC_ID, {
       startFind: 'Riverbend mill.',
       endFind: 'Riverbend mill.',
     });

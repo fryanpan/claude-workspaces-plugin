@@ -246,7 +246,7 @@ export async function handleWorkspaceContent(
         console.error(`[import-tasks] could not stamp ${path}:`, err);
       }
     } else writeFileSync(path, stamped);
-    if (bound) docStore.reparseFromDisk(bound.docId);
+    if (bound) docStore.bindings.reparseFromDisk(bound.docId);
     // Task/goal events already refreshed the projection; this covers a
     // mapping with zero new goals and zero tasks (nothing emitted).
     taskProjection.ensureWorkspace(workspaceId);
