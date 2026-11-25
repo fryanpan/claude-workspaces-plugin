@@ -3,7 +3,7 @@
  * Pack `@claude-workspaces/components` into a tarball a site outside this
  * repo installs: `bun run --cwd packages/components pack [outDir]`.
  *
- * The package's own source imports five files of `packages/core/src` by
+ * The package's own source imports six files of `packages/core/src` by
  * package name. The packed copy carries those files under `src/core/` and
  * points the imports at them, so nothing in the tarball names this repo.
  *
@@ -47,6 +47,7 @@ export const CORE_FILES = [
   'component-snapshot.ts',
   'component-state-rules.ts',
   'map-basemaps.ts',
+  'map-card.ts',
   'map-spec.ts',
   'mdx-component-runtime.ts',
   'tag-props.ts',

@@ -16,12 +16,12 @@ The package is a tarball. It has no dependencies (Leaflet is bundled in), so
 it installs offline from the file alone:
 
 ```bash
-mkdir -p vendor && cp claude-workspaces-components-0.4.1.tgz vendor/
-bun add ./vendor/claude-workspaces-components-0.4.1.tgz   # or npm install
+mkdir -p vendor && cp claude-workspaces-components-0.5.0.tgz vendor/
+bun add ./vendor/claude-workspaces-components-0.5.0.tgz   # or npm install
 ```
 
 Your `package.json` then names it as
-`"@claude-workspaces/components": "file:./vendor/claude-workspaces-components-0.4.1.tgz"`.
+`"@claude-workspaces/components": "file:./vendor/claude-workspaces-components-0.5.0.tgz"`.
 
 ## Mount the map
 
@@ -84,14 +84,15 @@ needed on the element.
 
 | Prop | What it is |
 | --- | --- |
-| `markers` | `[{ lat, lng, label?, popup?, category? }]`, at most 2,000. Each is a dot with a popup and every ring around it. |
-| `points` | `[{ lat, lng, popup?, category? }]`, at most 50,000, small dots on one canvas. |
+| `markers` | `[{ lat, lng, label?, popup?, tooltip?, category? }]`, at most 2,000. Each is a dot with a popup and every ring around it. `popup` is words or a [card](#popups-tooltips-and-taps); `tooltip` is words shown on hover. |
+| `points` | `[{ lat, lng, popup?, tooltip?, category? }]`, at most 50,000, small dots on one canvas. A point with a popup or tooltip takes taps and hovers. |
 | `layers` | GeoJSON layers, at most 24, drawn in the order given beneath the points and markers. See [Layers](#layers). |
 | `rings` | Distances in feet (`150`), or `{ feet \| meters, color?, label? }`, at most 6. |
 | `categories` | `{ name: "#hex" }` or `[{ name, color }]`: the legend's order and colours. |
 | `center`, `zoom` | `[lat, lng]` and 1 to 20; without them the map fits its data. |
 | `height` | Pixels, 160 to 1200; 480 by default. |
 | `legend` | `false` hides the legend. |
+| `cooperativeGestures` | `true` lets Ctrl or Cmd with the mouse wheel zoom the map; a plain wheel scrolls the page and shows "Use ⌘ + scroll to zoom the map" (Ctrl off a Mac). Without it the wheel always scrolls the page. See [Wheel zoom](#wheel-zoom). |
 | `title`, `subtitle`, `note` | Words above and below the map, as text. |
 | `basemap` | `osm`, `carto-light` (drawn on OpenStreetMap) or `google`. See below. |
 | `basemapKey` | The key for a basemap that needs one. |
@@ -117,7 +118,9 @@ layer takes:
 | `name` | The words beside its switch under the map; its id without. |
 | `visible` | `false` starts it switched off. |
 | `minZoom`, `maxZoom` | Optional. The zooms it draws at, 0 to 24, both ends included; `minZoom` above `maxZoom` is refused. Outside the range the map takes the layer off, and puts it back when the zoom returns. Without them it draws at every zoom. |
-| `popup` | Line, polygon and circle only. A template whose `{key}` is filled from the tapped feature's properties, as text: `"{name}: {speed} mph"`. Without it the layer takes no taps. |
+| `popup` | Line, polygon and circle only. A template whose `{key}` is filled from the tapped feature's properties, as text: `"{name}: {speed} mph"`, or a [card](#popups-tooltips-and-taps) whose fields are such templates. |
+| `tooltip` | Line, polygon and circle only. A template, filled the same way, shown while the pointer is over a feature. |
+| `clickable` | `true` makes the layer take taps with no popup or tooltip, so the page hears of them through [`cw-map-feature-click`](#popups-tooltips-and-taps). A layer with none of the three takes no taps. |
 
 A switch per layer sits under the map, in the order given, and the reader's
 choice holds through every redraw. `legend: false` hides the switches with
@@ -248,6 +251,75 @@ points drew with no task longer than 135 ms, including a zoom.
 (eight levels deep, 256 KB) leave no room for GeoJSON inline, so a layer
 written to the state names its file with `url`.
 
+## Popups, tooltips and taps
+
+**Card popups.** A `popup` on a marker, point or layer is words, or a card:
+
+```ts
+popup: {
+  title: 'Harborlight school',
+  lines: ['Riverbend district', '412 pupils'],         // at most 20
+  link: { href: 'https://example.org/harborlight', text: 'School page' },
+}
+```
+
+A card is data, not markup. Its title and lines reach the page as text, so
+`<b>` shows as those three characters and nothing in a card can run a script
+or an event handler. The link must be an http(s) URL: a card with any other
+`href` (`javascript:`, `data:`, a bare path) is refused when the map mounts,
+and the map shows the message in its place. The link opens in a new tab
+(`target="_blank"`, `rel="noopener noreferrer"`) and reads as its `href`
+when `text` is left out. A card with no field draws as no popup, so a
+marker's falls back to its label. On a layer, every field is a `{key}`
+template filled from the tapped feature. A layer's `href` starts with
+`http://` or `https://` (`"https://example.org/{slug}"`), or is a whole key
+(`"{url}"`); either way the filled link is checked again, and one that is
+not an http(s) URL once filled is left off that popup.
+
+**Tooltips.** `tooltip` on a marker, point or layer shows words while the
+pointer is over it: a marker's and a point's as given, a layer's filled from
+the feature under the pointer. A tooltip is text, like a popup.
+
+**Taps.** A tap on a marker, a point with a popup or tooltip, or a feature
+of a layer that takes taps raises `cw-map-feature-click` on the element the
+map was mounted on. It bubbles, so a listener on `document` hears it too:
+
+```ts
+import mount, { FEATURE_CLICK } from '@claude-workspaces/components/map';
+
+const map = mount(el, props);
+el.addEventListener(FEATURE_CLICK, (e) => {
+  const { layer, index, item, lat, lng } = (e as CustomEvent).detail;
+  // layer: 'markers', 'points' or the layer's id; index: its row or feature;
+  // item: that marker or point row, or the feature's properties.
+  if (layer === 'schools') map.setView([lat, lng], 16);
+});
+```
+
+`map.setView([lat, lng], zoom?)` moves the map from the host page; without
+`zoom` it keeps the current one. Called before the map first draws, it
+applies once it has, and called during a zoom animation, once that ends. A
+center or zoom that is not a finite number changes nothing. Once a move
+ends, the map's `.cw-map-slot` holds the view as `data-zoom` and
+`data-center` (`"lat,lng"`, five decimals).
+
+Each dot of a `MultiPoint` in a circle layer is that feature: its tooltip,
+popup and tap all read the feature's properties and index.
+
+## Wheel zoom
+
+A map in a page that scrolls should not take the page's scroll. So by
+default the mouse wheel over the map is left to the page: it scrolls the
+page, the page's own wheel listeners hear it, and the map zooms with its +
+and − buttons, a pinch, or a double tap. With
+`cooperativeGestures: true`, holding Ctrl (or Cmd on a Mac) while turning
+the wheel zooms the map, and a plain wheel scrolls the page and shows, over
+the map for a second, "Use ⌘ + scroll to zoom the map" ("Ctrl" off a Mac).
+The hint is the element `.cw-map-gesture-hint`, which a host can restyle.
+On such a map a plain wheel still scrolls the page, but the page's own
+wheel listeners do not hear it: it is stopped on the map so that Leaflet
+does not zoom.
+
 ## State
 
 Each of `markers`, `points`, `rings`, `categories`, `center`, `zoom`,
@@ -302,6 +374,14 @@ built from the claude-workspaces repo with
 `package.json` and moves to a new version by replacing the tarball and that
 line.
 
+- 0.5.0: what a page moving off MapLibre needs. `cooperativeGestures`
+  (Ctrl or Cmd with the wheel zooms; a plain wheel shows a hint), `tooltip`
+  on markers, points and layers, the `cw-map-feature-click` event with
+  `setView` on the handle, `clickable` layers, and card popups (title,
+  lines, one http(s) link). Every 0.4.1 prop draws as before except an
+  object as a marker's or point's `popup`: 0.4.1 ignored it (a marker showed
+  its label), and 0.5.0 reads it as a card, refusing the map when the card
+  has a field it cannot draw.
 - 0.4.1: a map naming `carto-light` draws on OpenStreetMap, because CARTO
   now stamps "API key required" on every tile requested without a key. No
   page needs `cartocdn.com` in its Content Security Policy any more.
@@ -328,8 +408,13 @@ line.
 bunx vitest run packages/components                          # unit and pack tests
 CW_BROWSER_TESTS=1 bunx vitest run packages/components/test/static-page-browser.test.ts
 CW_BROWSER_TESTS=1 bunx vitest run packages/components/test/layers-browser.test.ts
+CW_BROWSER_TESTS=1 bunx vitest run packages/components/test/interaction-browser.test.ts
 ```
 
-The browser test packs the tarball, installs it into a temporary folder and
-draws the map on a plain HTML page in headless Chromium, with every tile
+`interaction-browser.test.ts` drives the four 0.5.0 additions with a mouse:
+the wheel hint and Ctrl zoom, tooltips on hover, the tap event and
+`setView`, and card popups with their link rules.
+
+The browser tests pack the tarball, install it into a temporary folder and
+draw the map on a plain HTML page in headless Chromium, with every tile
 request answered locally.

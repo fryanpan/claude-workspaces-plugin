@@ -44,6 +44,7 @@
     "./show-estimates": "./src/show-estimates.ts",
     "./plot-spec": "./src/plot-spec.mjs",
     "./map-spec": "./src/map-spec.ts",
+    "./map-card": "./src/map-card.ts",
     "./map-basemaps": "./src/map-basemaps.ts",
     "./tag-props": "./src/tag-props.ts",
     "./plot-chart": "./src/plot-chart.ts",

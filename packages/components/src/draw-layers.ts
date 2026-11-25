@@ -24,7 +24,10 @@
  * switch is kept apart from it, so a layer switched on outside its range
  * draws once the zoom enters it.
  *
- * Popups are built when a path is tapped, from the layer's template, as text.
+ * Popups and hover tooltips are built when they open, from the layer's
+ * templates, as text (`popup-node.ts`). A layer with a popup, a tooltip or
+ * `clickable` takes taps, and each tap is handed to `onHit` with the
+ * feature's index and properties.
  */
 import L from 'leaflet';
 import { HeatLayer } from './heat.ts';
@@ -35,6 +38,15 @@ import {
   type MapLayer,
   popupText,
 } from './layers.ts';
+import { popupNode, tooltipNode } from './popup-node.ts';
+
+/** A tap on a feature of layer `id`: its index in the layer's data. */
+export type LayerHit = (
+  id: string,
+  index: number,
+  at: L.LatLng,
+  properties: Record<string, unknown>,
+) => void;
 
 /** A layer with its data judged, ready to draw. */
 export interface ReadyLayer {
@@ -84,6 +96,7 @@ export class LayerStack {
     private readonly map: L.Map,
     /** The renderer the points draw with. */
     private readonly renderer: L.Renderer,
+    private readonly onHit: LayerHit = () => {},
   ) {
     for (const [name, z] of [
       ['cw-heat-below', HEAT_BELOW_Z],
@@ -125,7 +138,7 @@ export class LayerStack {
       }
       if (data.kind !== 'paths' || layer.type === 'heatmap') continue;
       pathsSeen = true;
-      const paths = this.pathsOf(layer);
+      const paths = this.pathsOf(layer, data.features);
       pending.push({ paths, features: data.features });
       const bounds = boundsOf(data.bbox);
       this.drawn.push({ id: layer.id, layer: paths, paths, heat: null, bounds, ...range });
@@ -164,8 +177,12 @@ export class LayerStack {
     }
   }
 
-  private pathsOf(layer: Exclude<MapLayer, { type: 'heatmap' }>): L.GeoJSON {
-    const template = layer.popup;
+  private pathsOf(
+    layer: Exclude<MapLayer, { type: 'heatmap' }>,
+    features: readonly LayerFeature[],
+  ): L.GeoJSON {
+    const { popup, tooltip } = layer;
+    const taps = popup !== undefined || tooltip !== undefined || layer.clickable === true;
     const style: L.PathOptions =
       layer.type === 'circle'
         ? {
@@ -194,16 +211,25 @@ export class LayerStack {
             };
     const paths = L.geoJSON(undefined, {
       renderer: this.renderer,
-      interactive: template !== undefined,
+      interactive: taps,
       className: `cw-map-${layer.type}`,
       style: () => style,
+      // A MultiPoint draws as a group of dots; each dot carries the feature,
+      // so a tap or hover on it reads that feature's properties.
+      onEachFeature: (feature: unknown, drawn: L.Layer) => {
+        if (drawn instanceof L.FeatureGroup) {
+          drawn.eachLayer((dot) => {
+            (dot as L.Layer & { feature?: unknown }).feature = feature;
+          });
+        }
+      },
       // A circle keeps its pixel radius at every zoom, on the shared canvas.
       ...(layer.type === 'circle'
         ? {
             pointToLayer: (_: unknown, at: L.LatLng) =>
               L.circleMarker(at, {
                 renderer: this.renderer,
-                interactive: template !== undefined,
+                interactive: taps,
                 className: 'cw-map-circle',
                 radius: layer.radius,
                 ...style,
@@ -211,16 +237,28 @@ export class LayerStack {
           }
         : {}),
     } as L.GeoJSONOptions);
-    if (template !== undefined) {
+    const doc = this.map.getContainer().ownerDocument;
+    // Leaflet keeps each feature object as the path's `feature`.
+    const index = new Map<unknown, number>(features.map((f, i) => [f, i]));
+    const propsOf = (from: unknown): Record<string, unknown> => {
+      const props = (from as { feature?: { properties?: unknown } } | undefined)?.feature
+        ?.properties;
+      return isRecord(props) ? props : {};
+    };
+    if (taps) {
       paths.on('click', (e: L.LeafletMouseEvent) => {
-        const from = e.propagatedFrom as { feature?: { properties?: unknown } } | undefined;
-        const props = from?.feature?.properties;
-        const words = popupText(template, isRecord(props) ? props : {});
-        const node = this.map.getContainer().ownerDocument.createElement('div');
-        node.className = 'cw-map-popup';
+        const from = e.propagatedFrom as { feature?: unknown } | undefined;
+        const props = propsOf(from);
+        this.onHit(layer.id, index.get(from?.feature) ?? -1, e.latlng, props);
+        if (popup === undefined) return;
+        const node = popupNode(doc, popup, (t) => popupText(t, props));
         node.dataset.layer = layer.id;
-        node.textContent = words;
         L.popup().setLatLng(e.latlng).setContent(node).openOn(this.map);
+      });
+    }
+    if (tooltip !== undefined) {
+      paths.bindTooltip((child: L.Layer) => tooltipNode(doc, popupText(tooltip, propsOf(child))), {
+        sticky: true,
       });
     }
     return paths;

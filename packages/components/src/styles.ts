@@ -27,6 +27,12 @@ const MAP_CSS = [
   '.cw-map-swatch.is-heatmap{opacity:.8}',
   '.cw-map-layer-why{margin-left:.4em;color:var(--cw-map-muted,#4b5563)}',
   '.cw-map-popup{white-space:pre-line}',
+  '.cw-map-card-title{display:block;margin:0 0 .25em}',
+  '.cw-map-card-line{margin:0 0 .15em}',
+  '.cw-map-card-link{display:inline-block;margin-top:.25em}',
+  // A plain scroll over a cooperative map shows this instead of zooming.
+  '.cw-map-gesture-hint{position:absolute;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.45);color:#fff;font-size:1.1em;pointer-events:none;opacity:0;transition:opacity .2s}',
+  '.cw-map-gesture-hint.is-shown{opacity:1}',
   // The markers' SVG spans the view; only its paths take taps, so a tap
   // between markers reaches the canvas of points and layers beneath.
   '.cw-map-slot .leaflet-pane>svg{pointer-events:none}',

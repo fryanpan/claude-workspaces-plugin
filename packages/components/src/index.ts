@@ -20,6 +20,8 @@ export type {
 } from '@claude-workspaces/core/mdx-component-runtime';
 export {
   type BasemapChoice,
+  FEATURE_CLICK,
+  type FeatureClick,
   MAP_STATE_KEYS,
   type MapHandle,
   type MapLayerProp,
