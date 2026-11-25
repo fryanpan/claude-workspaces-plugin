@@ -9,9 +9,10 @@
  * onto the recipient's inbox doc. The classifier is a stub: no request leaves
  * the machine.
  *
- * What this proves: a lead-to-lead message across organizations is refused,
+ * What this proves: a message across organizations between two seats that
+ * do not hold cross-organization access is refused,
  * one inside an organization is delivered, a cross-organization message
- * between two seats holding that access is delivered marked with its source, a planted
+ * involving a seat holding that access is delivered marked with its source, a planted
  * injection is held by the filter and never reaches the recipient, a filter
  * that throws or never answers holds too, a release delivers a held message,
  * and the log records every verdict without a message body.
@@ -159,7 +160,8 @@ describe('the relay between two organizations', () => {
           },
         },
         seats: {
-          // Both ends of a cross-organization message hold the access.
+          // The seats that hold cross-organization access; a message across
+          // needs one of them at one end.
           'harborlight-lead': await seat(
             harbor,
             'harborlight-server',
@@ -221,10 +223,10 @@ describe('the relay between two organizations', () => {
       ? { hold: true, reason: 'instruction aimed at the receiving agent' }
       : { hold: false };
 
-  it('refuses a lead-to-lead message across organizations', async () => {
+  it('refuses a message across organizations when neither seat holds the access', async () => {
     const { relay, store } = relayWith(passAll);
     const id = await send(
-      'harborlight-lead',
+      'harborlight-writer',
       'riverbend-lead',
       'Riverbend, when does your sim land?',
     );
@@ -238,8 +240,8 @@ describe('the relay between two organizations', () => {
       toOrganization: 'riverbend',
     });
     // The sender hears why, on its own outbox thread.
-    const outbox = await threads(harbor, harborBoard, outboxOf('harborlight-lead'));
-    const replies = outbox.find((t) => `harborlight-lead:${t.id}` === id)?.comments ?? [];
+    const outbox = await threads(harbor, harborBoard, outboxOf('harborlight-writer'));
+    const replies = outbox.find((t) => `harborlight-writer:${t.id}` === id)?.comments ?? [];
     expect(replies.some((c) => c.author.id === RELAY_AGENT && /refused/.test(c.text))).toBe(true);
   });
 

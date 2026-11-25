@@ -1,12 +1,6 @@
-#!/usr/bin/env bun
 /**
- * `bun run relay:install` — install the org relay for the seats in
- * `infra/org-relay/seats.json`, so nobody builds its config by hand.
- *
- *   bun run relay:install                     install, or bring an install up to date
- *   bun run relay:install --dry-run           print the plan, tokens redacted; write nothing
- *   bun run relay:install --remint            mint every board token again
- *   bun run relay:install --board <seat>=<id> name a seat's board when the lookup cannot
+ * `bun run relay:install` (`install-cli.ts`) — install the org relay for the
+ * seats in `infra/org-relay/seats.json`, so nobody builds its config by hand.
  *
  * In order:
  *  1. For each seat, finds its board (the one whose lead is the seat's agent),
@@ -17,6 +11,10 @@
  *     replaces it, and the old record is revoked once the check below passes.
  *  2. Writes the relay config (`relay-config.ts`) at mode 600. An Access
  *     service token is read from the Keychain (`tokenServices`).
+ *  2b. On a project server with no Access in front, puts a token minted for
+ *     Team Lead into the Mac's home-remotes file (`install-home.ts`), so Home
+ *     can pull the board's feed and ack its escalations, and restarts the
+ *     Mac's server, which reads that file at start.
  *  3. Writes the relay's LaunchAgent and (re)starts it.
  *  4. Sets CW_LEAD_INBOX_DOC and CW_RELAY_AGENT_ID as Fly secrets on each
  *     project app whose lead is a seat. Setting them restarts that machine,
@@ -37,6 +35,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
+import { HOME_REMOTE_TOKENS_FILE } from '../../packages/server/src/home-remote-tokens.ts';
 import {
   applySavedBearers,
   bearerExpiresAt,
@@ -52,6 +51,7 @@ import {
   type ApiIo,
   type BoardCall,
   type RunResult,
+  type TokenRecord,
   boardCall,
   fileTask,
   leadBoard,
@@ -60,7 +60,9 @@ import {
   taskTitled,
   tokenRecords,
 } from './install-api.ts';
+import { homeFeedAnswers, planHomeFeedTokens } from './install-home.ts';
 import {
+  MAC_SERVER,
   RELAY_LABEL,
   type ResolvedSeat,
   type ServerSecrets,
@@ -79,6 +81,10 @@ export interface InstallOptions {
   remint: boolean;
   /** Seat id → board id, for a seat whose board the lookup cannot find. */
   boards: Map<string, string>;
+  /** The file `CW_HOME_REMOTES_FILE` names on the Mac (`install-home.ts`). */
+  homeRemotes?: string;
+  /** Restart the Mac's server when that file changes; off with --no-server-restart. */
+  restartServer?: boolean;
 }
 
 export interface InstallIo extends ApiIo {
@@ -104,6 +110,8 @@ export interface RelayPaths {
   stateDir: string;
   log: string;
   installed: string;
+  /** The Mac server's renewed home-feed tokens (`home-remote-tokens.ts`). */
+  homeRenewed: string;
   plist: string;
   bun: string;
   repo: string;
@@ -118,11 +126,15 @@ export function relayPaths(home: string): RelayPaths {
     stateDir: join(dir, 'state'),
     log: join(dir, 'relay.log'),
     installed: join(dir, 'installed.json'),
+    homeRenewed: join(support, 'data', HOME_REMOTE_TOKENS_FILE),
     plist: join(home, 'Library', 'LaunchAgents', `${RELAY_LABEL}.plist`),
     bun: join(support, 'bin', 'bun'),
     repo: join(support, 'repo'),
   };
 }
+
+/** The Mac's server's LaunchAgent, restarted when Home's file changes. */
+const SERVER_LABEL = 'com.fryanpan.claude-workspaces';
 
 /** A token the dry run has not minted: valid to the config parser, never sent. */
 const UNMINTED = 'at2.unminted.relay.board.0.x';
@@ -180,12 +192,14 @@ export async function runInstall(opts: InstallOptions, io: InstallIo): Promise<n
   const seats: ResolvedSeat[] = [];
   const revokes: Array<{ call: BoardCall; id: string; where: string }> = [];
   const calls = new Map<string, BoardCall>();
+  const recordsOf = new Map<string, TokenRecord[]>();
 
   // 1. Boards, tasks and tokens, one server at a time.
   for (const server of servers) {
     const call = boardCall(server, io);
     calls.set(server.id, call);
     const records = await tokenRecords(call);
+    recordsOf.set(server.id, records);
     const bearers = new Map<string, string>();
     for (const seat of list.seats.filter((s) => s.server === server.id)) {
       const named = opts.boards.get(seat.id);
@@ -261,6 +275,24 @@ export async function runInstall(opts: InstallOptions, io: InstallIo): Promise<n
     secrets.set(server.id, sec);
   }
 
+  // Home's board tokens for Team Lead, on each server with no Access in front.
+  const home = await planHomeFeedTokens({
+    servers,
+    seats,
+    calls,
+    records: recordsOf,
+    teamLead: list.seats.find((s) => s.server === MAC_SERVER)?.agentId ?? '',
+    path: opts.homeRemotes,
+    renewedPath: paths.homeRenewed,
+    remint: opts.remint,
+    dryRun: opts.dryRun,
+    now: io.now(),
+    say,
+  });
+  revokes.push(...home.revokes);
+  const restartServer = opts.restartServer !== false;
+  const serverRestart = `launchctl kickstart -k gui/${io.uid}/${SERVER_LABEL}`;
+
   // 2. The config.
   const configText = relayConfigText(servers, secrets, seats);
   const plistText = relayPlist({
@@ -302,6 +334,14 @@ export async function runInstall(opts: InstallOptions, io: InstallIo): Promise<n
           : `would set on ${p.app}: ${p.input.trim().replace('\n', ', ')} (restarts the machine)`,
       );
     }
+    if (home.text !== null) {
+      say(`would write boardTokens into ${opts.homeRemotes}`);
+      say(
+        restartServer
+          ? `would restart the Mac's server (${serverRestart}), which reads it at start`
+          : `then run: ${serverRestart}`,
+      );
+    }
     for (const r of revokes) say(`would revoke record ${r.id} on ${r.where}`);
     return 0;
   }
@@ -312,6 +352,17 @@ export async function runInstall(opts: InstallOptions, io: InstallIo): Promise<n
   if (configChanged) writePrivate(paths.config, configText);
   chmodSync(paths.config, 0o600);
   say(configChanged ? `wrote ${paths.config}` : `${paths.config} is unchanged`);
+  if (home.text !== null && opts.homeRemotes) {
+    writePrivate(opts.homeRemotes, home.text);
+    say(`wrote boardTokens into ${opts.homeRemotes}`);
+    if (restartServer) {
+      const r = io.launchctl(['kickstart', '-k', `gui/${io.uid}/${SERVER_LABEL}`]);
+      if (r.status !== 0) throw new Error(`restarting the Mac's server failed: ${r.stderr.trim()}`);
+      say(`restarted the Mac's server, which reads that file at start`);
+    } else {
+      say(`the Mac's server reads that file at start: run ${serverRestart}`);
+    }
+  }
 
   // 3. The LaunchAgent. Its log's length now, so the check reads only what
   // the relay writes after this start.
@@ -369,19 +420,30 @@ export async function runInstall(opts: InstallOptions, io: InstallIo): Promise<n
   applySavedBearers(config, paths.stateDir);
   // A machine whose secrets were just set is restarting: ask until it answers.
   const answerBy = io.now() + (io.answerWaitMs ?? 180_000);
-  let answered = 0;
-  for (const seat of config.seats.values()) {
-    const server = config.servers.get(seat.server);
-    let ok = false;
-    while (server && !ok) {
-      ok = (await readOutbox(io.fetch, server, seat.board, seat.outboxDoc)) !== null;
-      if (ok || io.now() >= answerBy) break;
+  const untilAnswered = async (ask: () => Promise<boolean>) => {
+    for (;;) {
+      if (await ask()) return true;
+      if (io.now() >= answerBy) return false;
       await io.sleep(2_000);
     }
+  };
+  let failed = 0;
+  for (const seat of config.seats.values()) {
+    const server = config.servers.get(seat.server);
+    const ok =
+      server !== undefined &&
+      (await untilAnswered(
+        async () => (await readOutbox(io.fetch, server, seat.board, seat.outboxDoc)) !== null,
+      ));
     say(`${seat.id}: ${seat.server} ${ok ? 'answered' : 'did not answer'} the relay's outbox read`);
-    if (ok) answered++;
+    if (!ok) failed++;
   }
-  const passed = started && answered === config.seats.size;
+  for (const check of home.checks) {
+    const ok = await untilAnswered(() => homeFeedAnswers(io.fetch, check));
+    say(`board ${check.board}: its home feed ${ok ? 'answered' : 'did not answer'} Home's token`);
+    if (!ok) failed++;
+  }
+  const passed = started && failed === 0;
   for (const r of revokes) {
     if (!passed) {
       say(
@@ -393,51 +455,4 @@ export async function runInstall(opts: InstallOptions, io: InstallIo): Promise<n
     say(`revoked record ${r.id} on ${r.where}`);
   }
   return passed ? 0 : 1;
-}
-
-export function parseArgs(argv: readonly string[]): InstallOptions {
-  const opts: InstallOptions = { dryRun: false, remint: false, boards: new Map() };
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (a === '--dry-run') opts.dryRun = true;
-    else if (a === '--remint') opts.remint = true;
-    else if (a === '--board') {
-      const m = /^([A-Za-z0-9_-]+)=([A-Za-z0-9_-]+)$/.exec(argv[++i] ?? '');
-      if (!m) throw new Error('--board takes <seat>=<board id>');
-      opts.boards.set(m[1] as string, m[2] as string);
-    } else throw new Error(`unknown argument ${a}`);
-  }
-  return opts;
-}
-
-if (import.meta.main) {
-  const { spawnSync } = await import('node:child_process');
-  const { homedir } = await import('node:os');
-  const { fly } = await import('../project-machine/mac-ops.ts');
-  const { macOutputs } = await import('../project-machine/mac-outputs.ts');
-  const { readMachines } = await import('../project-machine/machines.ts');
-  const { readKeychainPassword } = await import('../../packages/server/src/share/keychain.ts');
-  try {
-    const code = await runInstall(parseArgs(process.argv.slice(2)), {
-      home: homedir(),
-      uid: process.getuid?.() ?? 501,
-      seatsText: readFileSync(join(import.meta.dir, 'seats.json'), 'utf8'),
-      projects: readMachines().map((m) => m.project),
-      outputs: () => macOutputs('prod'),
-      fetch: (url, init) => fetch(url, init),
-      fly: (args, input) => fly(args, { input }),
-      launchctl: (args) => {
-        const r = spawnSync('launchctl', args, { encoding: 'utf8' });
-        return { status: r.status ?? 1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
-      },
-      keychain: (service) => readKeychainPassword(service),
-      now: () => Date.now(),
-      sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
-      out: (line) => console.log(line),
-    });
-    process.exit(code);
-  } catch (e) {
-    console.error(`[relay:install] ${(e as Error).message}`);
-    process.exit(1);
-  }
 }

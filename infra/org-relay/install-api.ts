@@ -169,6 +169,7 @@ export interface TokenRecord {
   id: string;
   agentId: string;
   boardId: string;
+  label?: string;
   revokedAt?: number;
 }
 
@@ -190,11 +191,12 @@ export async function mintToken(
   call: BoardCall,
   agentId: string,
   boardId: string,
+  label = 'org relay',
 ): Promise<string> {
-  const res = await call('POST', '/api/board-tokens', { agentId, boardId, label: 'org relay' });
+  const res = await call('POST', '/api/board-tokens', { agentId, boardId, label });
   const token = isObject(res.body) ? res.body.token : undefined;
   if (res.status !== 201 || typeof token !== 'string') {
-    throw new Error(`minting the relay's token on ${boardId} answered ${res.status}`);
+    throw new Error(`minting a token for ${agentId} on ${boardId} answered ${res.status}`);
   }
   return token;
 }

@@ -719,7 +719,10 @@ The org relay carries messages between the leads' seats
 seats in `infra/org-relay/seats.json`. That file names each seat by its role
 and never by a board or doc id. A Mac seat names its agent id. A project seat
 names its project in `machines.json`, and its agent is that project's lead
-(`<project>-lead`, or the seat's `agentName`). Run it with `--dry-run` first.
+(`<project>-lead`, or the seat's `agentName`). Only Team Lead's seat holds
+`crossOrganization`: a message crosses organizations only when one end holds
+it, so Team Lead reaches every lead and two leads in different organizations
+never reach each other. Run it with `--dry-run` first.
 The dry run prints the plan with every token value redacted, and it writes,
 mints and files nothing. It does read each server, over `fly ssh console` for
 a project machine.
@@ -738,7 +741,7 @@ The script does these steps in order:
    installed config already holds a token whose record is live, the script
    keeps it. **`--remint` mints a new token, which replaces the old one.**
    The script revokes the old record, and any other live relay record on
-   that board, only after the check in step 5 passes.
+   that board, only after the check in step 6 passes.
 2. **It writes the config.** The file is
    `~/Library/Application Support/claude-workspaces/relay/relay-config.json`,
    at mode 600, in the shape `relay-config.ts` reads. The script checks the
@@ -748,7 +751,18 @@ The script does these steps in order:
    name. The script reads the token's client id and secret from the Keychain
    under `tokenServices` names. No token value goes into an argument, onto
    stdout or into a log.
-3. **It writes and loads the LaunchAgent.** The agent is
+3. **It gives Home its token for each board with no Access in front.** On
+   such a server, the Mac's escalation ack is admitted only with an `at2`
+   minted for Team Lead on that board, and the home-feed pull uses the same
+   token. So the script keeps, or mints for the Mac seat's agent, the
+   `boardTokens` entry for each seat board in the file `CW_HOME_REMOTES_FILE`
+   names (pass it with `--home-remotes <path>`, or set the variable). The
+   board must already be listed in that file's `boardOrigins`. The Mac's
+   server reads the file only at start, so when the file changes the script
+   restarts that server with `launchctl kickstart -k`;
+   `--no-server-restart` prints the command instead. The check in the last
+   step reads each such board's feed with the token.
+4. **It writes and loads the LaunchAgent.** The agent is
    `~/Library/LaunchAgents/com.fryanpan.claude-workspaces-relay.plist`. It
    runs `relay-bin.ts` from prod's checkout with prod's bun, with
    `CW_RELAY_CONFIG` and `CW_RELAY_STATE_DIR` (`relay/state`) set, and
@@ -756,12 +770,12 @@ The script does these steps in order:
    loads it again. If only the config changed, the script restarts the relay
    with `kickstart -k`. If neither changed and the relay is loaded, the
    script leaves it running.
-4. **It sets the lead's two settings.** It sets `CW_LEAD_INBOX_DOC` and
+5. **It sets the lead's two settings.** It sets `CW_LEAD_INBOX_DOC` and
    `CW_RELAY_AGENT_ID` with `fly secrets import`, values on stdin, on each
    project app whose lead is a seat. **This restarts that machine.** So the
    script records what it set in `relay/installed.json` and skips an app
    whose values have not changed.
-5. **It checks the result.** The relay must log `running: N seats` after this
+6. **It checks the result.** The relay must log `running: N seats` after this
    start, and every seat's server must answer the relay's own read of the
    seat's outbox. A machine whose secrets were just set is restarting, so
    the script asks each server for up to three minutes. If either check
@@ -773,7 +787,8 @@ relay.
 
 The relay runs as the Mac's own user, so any process of that user can read
 its config. The separate macOS user that
-[security.md](../architecture/security.md) asks for is not installed yet.
+[security.md](../architecture/security.md) asks for needs a `sudo` step from
+Bryan; it is named there under Known gaps.
 
 ## GitHub events for a board here
 
