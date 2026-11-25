@@ -1655,7 +1655,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     recordDelivery(
       { docId, threadId, commentId: comment.id, channels, at: Date.now() },
       {
-        markDelivered: (d, t, c, at) => docStore.markCommentDelivered(d, t, c, at),
+        markDelivered: (d, t, c, at) => docStore.docThreads.markCommentDelivered(d, t, c, at),
         announce: (channel, frame) => {
           if (!quiet.has(channel)) {
             sse.broadcastTransient(channel, frame, { skipAgentStreams: true });

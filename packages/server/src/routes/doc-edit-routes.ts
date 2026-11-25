@@ -195,18 +195,18 @@ export async function handleDocEditRoutes(
       });
       return res.ok ? j(200, { ok: true }) : j(409, res);
     }
-    const res = docStore.setDocContent(docId, markdown);
+    const res = docStore.docEdits.setDocContent(docId, markdown);
     return res.ok ? j(200, withSyncError(docStore, docId, res)) : j(409, res);
   }
   if (rest === 'reparse_from_disk' && req.method === 'POST') {
-    const res = docStore.reparseFromDisk(docId);
+    const res = docStore.bindings.reparseFromDisk(docId);
     return res.ok ? j(200, res) : j(409, res);
   }
   if (rest === 'agent_anchors' && req.method === 'POST') {
     const body = sent<CreateAnchorBody>(await safeJson(req));
     const find = String(body?.find ?? '');
     if (find.length === 0) return j(400, { error: 'find is required' });
-    const res = docStore.createAgentAnchor(docId, {
+    const res = docStore.docEdits.createAgentAnchor(docId, {
       find,
       contextBefore: body?.contextBefore ? String(body.contextBefore) : undefined,
       contextAfter: body?.contextAfter ? String(body.contextAfter) : undefined,
@@ -226,8 +226,8 @@ export async function handleDocEditRoutes(
       if (kind !== 'replace' && kind !== 'insert_after') {
         return j(400, { error: 'kind must be replace or insert_after' });
       }
-      const res = docStore.guardScopedEdit(docId, scopedEditGuard(body, authorFor), () =>
-        docStore.editAtAgentAnchor(docId, anchorId, { kind, text }),
+      const res = docStore.docEdits.guardScopedEdit(docId, scopedEditGuard(body, authorFor), () =>
+        docStore.docEdits.editAtAgentAnchor(docId, anchorId, { kind, text }),
       );
       return res.ok ? j(200, withSyncError(docStore, docId, res)) : j(409, res);
     }
@@ -239,13 +239,13 @@ export async function handleDocEditRoutes(
       if (placement === PLACEMENT_INVALID) {
         return j(400, { error: "placement must be 'after-block' or 'top-level'" });
       }
-      const res = docStore.guardScopedEdit(docId, scopedEditGuard(body, authorFor), () =>
-        docStore.insertBlocksAtAnchor(docId, anchorId, markdown, { placement }),
+      const res = docStore.docEdits.guardScopedEdit(docId, scopedEditGuard(body, authorFor), () =>
+        docStore.docEdits.insertBlocksAtAnchor(docId, anchorId, markdown, { placement }),
       );
       return res.ok ? j(200, withSyncError(docStore, docId, res)) : j(409, res);
     }
     if (anchorRest === '' && req.method === 'DELETE') {
-      const removed = docStore.deleteAgentAnchor(docId, anchorId);
+      const removed = docStore.docEdits.deleteAgentAnchor(docId, anchorId);
       return removed ? j(200, { ok: true }) : j(404, { error: 'anchor not found' });
     }
   }
@@ -282,8 +282,8 @@ export async function handleDocEditRoutes(
       });
       return res.ok ? j(200, res) : j(409, res);
     }
-    const res = docStore.guardScopedEdit(docId, scopedEditGuard(body, authorFor), () =>
-      docStore.findAndReplace(docId, {
+    const res = docStore.docEdits.guardScopedEdit(docId, scopedEditGuard(body, authorFor), () =>
+      docStore.docEdits.findAndReplace(docId, {
         find,
         replace,
         contextBefore,
@@ -329,7 +329,7 @@ export async function handleDocEditRoutes(
   // `suggest: true` on find_and_replace / rewrite_region above for
   // creation.
   if (rest === 'suggestions' && req.method === 'GET') {
-    return j(200, { suggestions: docStore.listSuggestions(docId) });
+    return j(200, { suggestions: docStore.docSuggests.listSuggestions(docId) });
   }
   if (rest === 'suggestions/resolve_all' && req.method === 'POST') {
     const body = sent<ResolveAllSuggestionsBody>(await safeJson(req));
@@ -347,8 +347,8 @@ export async function handleDocEditRoutes(
     const action = suggestionMatch[2];
     const res =
       action === 'accept'
-        ? docStore.acceptSuggestion(docId, sid)
-        : docStore.rejectSuggestion(docId, sid);
+        ? docStore.docSuggests.acceptSuggestion(docId, sid)
+        : docStore.docSuggests.rejectSuggestion(docId, sid);
     return res.ok ? j(200, withSyncError(docStore, docId, res)) : j(404, res);
   }
   if (rest === 'delete_block_at_anchor' && req.method === 'POST') {
@@ -358,10 +358,10 @@ export async function handleDocEditRoutes(
     if ((threadId && anchorId) || (!threadId && !anchorId)) {
       return j(400, { error: 'exactly one of threadId or anchorId required' });
     }
-    const res = docStore.guardScopedEdit(docId, scopedEditGuard(body, authorFor), () =>
+    const res = docStore.docEdits.guardScopedEdit(docId, scopedEditGuard(body, authorFor), () =>
       threadId
-        ? docStore.deleteBlockAtThread(docId, threadId)
-        : docStore.deleteBlockAtAgentAnchor(docId, anchorId!),
+        ? docStore.docEdits.deleteBlockAtThread(docId, threadId)
+        : docStore.docEdits.deleteBlockAtAgentAnchor(docId, anchorId!),
     );
     return res.ok ? j(200, res) : j(409, res);
   }
@@ -372,8 +372,8 @@ export async function handleDocEditRoutes(
     if (startFind.length === 0 || endFind.length === 0) {
       return j(400, { error: 'startFind and endFind are required' });
     }
-    const res = docStore.guardScopedEdit(docId, scopedEditGuard(body, authorFor), () =>
-      docStore.deleteBlocksInRange(docId, {
+    const res = docStore.docEdits.guardScopedEdit(docId, scopedEditGuard(body, authorFor), () =>
+      docStore.docEdits.deleteBlocksInRange(docId, {
         startFind,
         endFind,
         contextBefore: body?.contextBefore ? String(body.contextBefore) : undefined,
@@ -390,8 +390,8 @@ export async function handleDocEditRoutes(
     const body = sent<DeleteSectionBody>(await safeJson(req));
     const heading = String(body?.heading ?? '');
     if (heading.length === 0) return j(400, { error: 'heading is required' });
-    const res = docStore.guardScopedEdit(docId, scopedEditGuard(body, authorFor), () =>
-      docStore.deleteSection(docId, {
+    const res = docStore.docEdits.guardScopedEdit(docId, scopedEditGuard(body, authorFor), () =>
+      docStore.docEdits.deleteSection(docId, {
         heading,
         level: typeof body?.level === 'number' ? Number(body.level) : undefined,
         occurrence: typeof body?.occurrence === 'number' ? Number(body.occurrence) : undefined,

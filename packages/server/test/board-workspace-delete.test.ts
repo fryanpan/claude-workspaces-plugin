@@ -508,7 +508,9 @@ describe('DELETE /workspaces/:id — board workspace', () => {
     // merely been dropped would fail here, and so would one whose files were
     // removed rather than parked.
     expect(existsSync(join(dataDir as string, '_archive', `${canonicalId}.ydoc`))).toBe(true);
-    expect(handle?.docStore.unarchiveDoc(canonicalId, { archivedBy: 'test' }).ok).toBe(true);
+    expect(handle?.docStore.workspaces.unarchiveDoc(canonicalId, { archivedBy: 'test' }).ok).toBe(
+      true,
+    );
     expect(handle?.docStore.get(canonicalId)).toBeDefined();
     rmSync(docDir, { recursive: true, force: true });
   });

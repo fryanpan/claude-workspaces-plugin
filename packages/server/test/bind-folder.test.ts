@@ -127,7 +127,7 @@ describe('DocStore.bindFolder (browse-mode alias)', () => {
       'why 2?',
     );
     expect(created.ok).toBe(true);
-    const tree = docStore.buildWorkspaceTree(res.workspaceId);
+    const tree = docStore.workspaces.buildWorkspaceTree(res.workspaceId);
     expect(tree.totalOpen).toBe(1);
   });
 });

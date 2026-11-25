@@ -1,19 +1,13 @@
 import { existsSync, mkdirSync } from 'node:fs';
 import {
   type Anchor,
-  type AnchorRefresh,
   type Comment,
-  type DeliveryStamp,
   type DocMeta,
   type DocOriginRepo,
   type DocTitleSource,
   type DocType,
-  type ElementAnchor,
-  type ReviewItemJudgement,
-  type ReviewPayload,
   type Thread,
   type User,
-  type VoiceNote,
   type WebhookPayload,
   type WriteVia,
   contentKind,
@@ -22,11 +16,9 @@ import {
   listThreadsWithLinks,
   prose,
   readDocMeta,
-  setThreadSummary,
   suggestOps,
   titleIsUnnamed,
 } from '@claude-workspaces/core';
-import { wordCount } from '@claude-workspaces/core/word-count';
 import type { ServerWebSocket } from 'bun';
 import * as awarenessProtocol from 'y-protocols/awareness';
 import * as Y from 'yjs';
@@ -37,6 +29,7 @@ import {
   forgettingWrites,
 } from './cold-threads-cache.ts';
 import { ComponentGrants } from './component-grants.ts';
+import { DocActivityRecorder } from './doc-activity-recorder.ts';
 import { DocCatalog, type DocCatalogHost } from './doc-catalog.ts';
 import { DocComponentBuilds } from './doc-component-builds.ts';
 import { DocEditOps, type DocEditPersistence } from './doc-edit-ops.ts';
@@ -73,23 +66,7 @@ export { isBoardOwnedDoc } from './doc-ids.ts';
  *  under the name it was first published as. */
 export { decideReconcile } from './file-binding.ts';
 
-import { type StoredSummary, needsCall } from '@claude-workspaces/core/summary-prompt';
-import {
-  type ActivityType,
-  type Event,
-  appendActivity,
-  buildEventDoc,
-  clampReadPayload,
-  eventId,
-  payloadDigest,
-  toUtcIso,
-} from './activity.ts';
-import {
-  type CommentTrust,
-  classifyActor,
-  commentTrustOf,
-  isOwnerActor,
-} from './actor-identity.ts';
+import { type CommentTrust, commentTrustOf } from './actor-identity.ts';
 import {
   type BindDiffOpts,
   type BindDiffResult,
@@ -125,12 +102,7 @@ import { docKeyForPath } from './doc-key.ts';
 import { type LiveCopyResult, type ResolveOpts, resolveLiveCopy } from './doc-live-copy.ts';
 import { resolveOriginRepoCheckout } from './doc-origin-repo.ts';
 import { DOC_STORE_TIMINGS } from './doc-store-timings.ts';
-import {
-  type ClosedEditSession,
-  EditSessionTracker,
-  type SocketEditor,
-  editSessionEvent,
-} from './edit-sessions.ts';
+import { EditSessionTracker, type SocketEditor } from './edit-sessions.ts';
 import { type TimeSlice, backgroundPasses, timeSlice } from './event-loop.ts';
 import {
   CONTENT_REVISION_ORIGIN,
@@ -148,16 +120,11 @@ import {
   writePrivateMeta,
 } from './private-meta.ts';
 import { RepoRegistry } from './repo-registry.ts';
-import { type ArchivedDoc, type ArchivedReview } from './review-archive.ts';
-import {
-  STALE_WRITE_WINDOW_MS,
-  type ScopedEditGuard,
-  type ScopedEditRefusal,
-} from './scoped-edit-guard.ts';
+import { STALE_WRITE_WINDOW_MS } from './scoped-edit-guard.ts';
 import type { SocketAccess } from './share/board-access.ts';
 import { boundFiles, redactBoundPath } from './slow-fs.ts';
 import type { SseBus } from './sse.ts';
-import type { ScheduleArgs, ThreadSummarizer } from './summarize.ts';
+import type { ThreadSummarizer } from './summarize.ts';
 import { deleteVoiceFeedback } from './voice-feedback-store.ts';
 import type { WebhookDispatcher } from './webhooks.ts';
 
@@ -570,7 +537,7 @@ export class DocStore {
    * The binding map, the mtime sweep, the write-back debounce and the doc-origin-repo
    * pin all live there; what stays here is the doc they act on.
    */
-  private readonly bindings = new FileBindings(this.bindingHost());
+  readonly bindings = new FileBindings(this.bindingHost());
 
   private bindingHost(): FileBindingHost {
     return {
@@ -632,7 +599,7 @@ export class DocStore {
    * closes. It holds the docs it acts on the only way it can — as doc
    * objects handed in per call — and reaches back here through thunks.
    */
-  private readonly fanout = new LiveDocFanout(this.fanoutHost());
+  readonly fanout = new LiveDocFanout(this.fanoutHost());
 
   private fanoutHost(): LiveDocFanoutHost {
     return {
@@ -647,7 +614,7 @@ export class DocStore {
       trustBoards: (doc) => this.cfg.commentTrustBoards?.(doc.docId) ?? [],
       summarizer: () => this.cfg.summarizer,
       thread: (docId, threadId) => this.getThread(docId, threadId),
-      memberOfCompanion: (docId) => this.memberOfCompanion(docId),
+      memberOfCompanion: (docId) => this.workspaces.memberOfCompanion(docId),
       schedulePersist: (doc) => this.saveToDisk(doc),
       scheduleRevisionBump: (doc) => this.scheduleRevisionBump(doc),
       maybeRebindHome: (doc) => this.bindings.maybeRebindHome(doc),
@@ -662,7 +629,7 @@ export class DocStore {
    * What this store answers about a doc without opening it — the listing
    * rows, the alias table and the activity mtimes (`doc-catalog.ts`).
    */
-  private readonly catalog = new DocCatalog(this.catalogHost());
+  readonly catalog = new DocCatalog(this.catalogHost());
 
   private catalogHost(): DocCatalogHost {
     return {
@@ -734,7 +701,7 @@ export class DocStore {
 
   /** The eviction policy's clock. See `DocStoreConfig.now`. */
   /** The thread verbs, and this store seen through the contract they need. */
-  private readonly docThreads = new DocThreads(this.docThreadPersistence());
+  readonly docThreads = new DocThreads(this.docThreadPersistence());
   private readonly reviewAnsweredListeners = new Set<
     (event: {
       docId: string;
@@ -765,12 +732,29 @@ export class DocStore {
       fireThreadEvent: (doc, event, thread, comment, opts, actor) =>
         this.fanout.fireEvent(doc, event, thread, comment, opts, actor),
       recordActivity: (doc, type, author, threadId, opts) =>
-        this.recordActivity(doc, type, author, threadId, opts),
+        this.activity.recordActivity(doc, type, author, threadId, opts),
     };
   }
 
+  /** What readers and writers did, to `activity.jsonl`, and the thread
+   *  summaries written outside the live path (`doc-activity-recorder.ts`). */
+  readonly activity = new DocActivityRecorder({
+    dataDir: () => this.cfg.dataDir,
+    summarizer: () => this.cfg.summarizer,
+    doc: (docId) => this.resolveDoc(docId),
+    metaOf: (docId) => this.docs.get(docId)?.meta ?? this.catalog.entry(docId)?.meta,
+    allDocIds: () => new Set([...this.catalog.ids(), ...this.docs.keys()]),
+    isResident: (docId) => this.docs.has(docId),
+    threadTotal: (docId) => this.catalog.threadCounts(docId).total,
+    thread: (docId, threadId) => this.docThreads.getThread(docId, threadId),
+    schedulePersist: (doc) => this.saveToDisk(doc),
+    evict: (docId) => {
+      this.evictDoc(docId);
+    },
+  });
+
   /** The editing verbs, and this store seen through the contract they need. */
-  private readonly docEdits = new DocEditOps(this.docEditPersistence());
+  readonly docEdits = new DocEditOps(this.docEditPersistence());
 
   private docEditPersistence(): DocEditPersistence {
     return {
@@ -783,7 +767,7 @@ export class DocStore {
 
   /** The suggestion verbs, resolving docs through `docEdits` so a dry run's
    *  copy is the doc they see. */
-  private readonly docSuggests = new DocSuggestOps(this.docSuggestPersistence());
+  readonly docSuggests = new DocSuggestOps(this.docSuggestPersistence());
 
   private docSuggestPersistence(): DocSuggestPersistence {
     return {
@@ -794,14 +778,14 @@ export class DocStore {
     };
   }
 
-  private readonly workspaces = new DocStoreWorkspaces(this.workspacePersistence());
+  readonly workspaces = new DocStoreWorkspaces(this.workspacePersistence());
 
   private workspacePersistence(): DocStoreWorkspacePersistence {
     return {
       dataDir: () => this.cfg.dataDir,
       decorate: (meta) => this.cfg.decorateDocMeta?.(meta) ?? meta,
       list: () => this.list(),
-      threadCounts: (docId) => this.threadCounts(docId),
+      threadCounts: (docId) => this.catalog.threadCounts(docId),
       peekThreads: (docId, filter) => this.peekThreads(docId, filter),
       peekMeta: (docId) => this.peekMeta(docId),
       docExists: (docId) => this.docExists(docId),
@@ -1204,7 +1188,7 @@ export class DocStore {
     );
     this.editSessions = new EditSessionTracker({
       ...(cfg.editSessionIdleMs !== undefined ? { idleMs: cfg.editSessionIdleMs } : {}),
-      emit: (session) => this.recordEditSession(session),
+      emit: (session) => this.activity.recordEditSession(session),
     });
     // The index IS the boot. Nothing is hydrated here: a start now costs one
     // read per doc of a small JSON row instead of decoding every CRDT ever
@@ -1379,26 +1363,6 @@ export class DocStore {
     return this.catalog.list();
   }
 
-  listFromIndex(): DocMeta[] {
-    return this.catalog.listFromIndex();
-  }
-
-  threadCountsFromIndex(docId: string): { open: number; total: number } | null {
-    return this.catalog.threadCountsFromIndex(docId);
-  }
-
-  lastThreadActivityFromIndex(docId: string): number | undefined {
-    return this.catalog.lastThreadActivityFromIndex(docId);
-  }
-
-  threadCounts(docId: string): { open: number; total: number } {
-    return this.catalog.threadCounts(docId);
-  }
-
-  lastThreadActivity(docId: string): number {
-    return this.catalog.lastThreadActivity(docId);
-  }
-
   /**
    * The newest comment on a doc, loading it only when no index row can say.
    *
@@ -1412,10 +1376,6 @@ export class DocStore {
       return this.catalog.lastThreadActivity(docId);
     }
     return this.listThreads(docId).reduce((last, t) => Math.max(last, t.lastActivity), 0);
-  }
-
-  activityAt(docId: string): number | undefined {
-    return this.catalog.activityAt(docId);
   }
 
   /**
@@ -1867,7 +1827,7 @@ export class DocStore {
         doc.meta.type === 'diff' &&
         !doc.meta.diffTarget &&
         !(doc.meta.relPath ?? '').toLowerCase().endsWith('.md');
-      return this.attachFlatFile(docId, src, { ...attachOpts, writeBack }).ok;
+      return this.bindings.attachFlatFile(docId, src, { ...attachOpts, writeBack }).ok;
     }
     if (doc.meta.type === 'mockup') {
       // A mockup's binding is watch-only, so hydration re-arms it exactly as
@@ -2919,72 +2879,6 @@ export class DocStore {
     return () => this.reviewAnsweredListeners.delete(listener);
   }
 
-  /** @see DocThreads.markCommentDelivered */
-  markCommentDelivered(
-    docId: string,
-    threadId: string,
-    commentId: string,
-    at: number,
-  ): DeliveryStamp {
-    return this.docThreads.markCommentDelivered(docId, threadId, commentId, at);
-  }
-
-  /** Replace a posted comment's words, keeping the old ones on its trail. */
-  editCommentText(
-    docId: string,
-    threadId: string,
-    commentId: string,
-    text: string,
-    opts: { actor: User; reason?: string; voice?: VoiceNote },
-  ): { ok: true; thread: Thread } | { ok: false; error: 'no-doc' | 'not-found' | 'unchanged' } {
-    return this.docThreads.editCommentText(docId, threadId, commentId, text, opts);
-  }
-
-  reviseCommentReview(
-    docId: string,
-    threadId: string,
-    commentId: string,
-    patch: { headline?: unknown; detail?: unknown; options?: unknown },
-    opts: { actor: User; revisedRange?: { start: number; end: number } },
-  ):
-    | { ok: true; review: ReviewPayload; thread: Thread }
-    | { ok: false; error: string; message?: string } {
-    return this.docThreads.reviseCommentReview(docId, threadId, commentId, patch, opts);
-  }
-
-  judgeCommentReview(
-    docId: string,
-    threadId: string,
-    commentId: string,
-    judgement: ReviewItemJudgement,
-    opts: { forVersion?: number; forPendingAt?: number } = {},
-  ):
-    | { ok: true; review: ReviewPayload; thread: Thread }
-    | { ok: false; error: 'no-doc' | 'not-a-review-item' | 'answered' | 'stale' } {
-    return this.docThreads.judgeCommentReview(docId, threadId, commentId, judgement, opts);
-  }
-
-  withdrawCommentReview(
-    docId: string,
-    threadId: string,
-    commentId: string,
-    opts: { actor: User; reason?: string; undo?: boolean },
-  ):
-    | { ok: true; review: ReviewPayload; thread: Thread }
-    | { ok: false; error: string; message?: string } {
-    return this.docThreads.withdrawCommentReview(docId, threadId, commentId, opts);
-  }
-
-  undoReviewItemAnswer(
-    docId: string,
-    threadId: string,
-    commentId: string,
-    author: User,
-    opts?: { generate?: boolean },
-  ): { ok: true; thread: Thread } | { ok: false; error: string } {
-    return this.docThreads.undoReviewItemAnswer(docId, threadId, commentId, author, opts);
-  }
-
   async createThreadByFind(
     docId: string,
     opts: {
@@ -3011,41 +2905,6 @@ export class DocStore {
       }
   > {
     return this.docThreads.createThreadByFind(docId, opts, author, text, writeOpts);
-  }
-
-  resolve(
-    docId: string,
-    threadId: string,
-    author?: User,
-    opts?: { generate?: boolean; via?: WriteVia },
-  ): Thread | null {
-    return this.docThreads.resolve(docId, threadId, author, opts);
-  }
-
-  reopen(
-    docId: string,
-    threadId: string,
-    author?: User,
-    opts?: { generate?: boolean; via?: WriteVia },
-  ): Thread | null {
-    return this.docThreads.reopen(docId, threadId, author, opts);
-  }
-
-  setProgress(
-    docId: string,
-    threadId: string,
-    state: 'working' | 'done' | 'open',
-    author: User,
-  ): Thread | 'not-found' | 'resolved' {
-    return this.docThreads.setProgress(docId, threadId, state, author);
-  }
-
-  reanchor(docId: string, threadId: string, anchor: Anchor): Thread | null {
-    return this.docThreads.reanchor(docId, threadId, anchor);
-  }
-
-  refreshAnchor(docId: string, threadId: string, seen: ElementAnchor): AnchorRefresh {
-    return this.docThreads.refreshAnchor(docId, threadId, seen);
   }
 
   listThreads(docId: string, filter?: { status?: 'open' | 'resolved' }): Thread[] {
@@ -3443,13 +3302,6 @@ export class DocStore {
     };
   }
 
-  listWorkspaceThreads(
-    setId: string,
-    opts?: { status?: 'open' | 'resolved' },
-  ): Array<Thread & { docId: string; relPath?: string }> {
-    return this.workspaces.listWorkspaceThreads(setId, opts);
-  }
-
   listGroupedDiff(setId: string): {
     setId: string;
     /** Same value as `setId`, deprecated for one release: this payload goes
@@ -3484,15 +3336,6 @@ export class DocStore {
     return this.workspaces.listRepoFiles(setId);
   }
 
-  /** A set's file, checked as a lazy open checks it. See the workspace surface. */
-  resolveSetFile(
-    setId: string,
-    relPath: string,
-    opts?: { media?: boolean },
-  ): ReturnType<DocStoreWorkspaces['resolveSetFile']> {
-    return this.workspaces.resolveSetFile(setId, relPath, opts);
-  }
-
   openContextFile(
     setId: string,
     relPath: string,
@@ -3504,16 +3347,6 @@ export class DocStore {
       }
   > {
     return this.workspaces.openContextFile(setId, relPath);
-  }
-
-  /** Open a folder member a link names before anybody opened it. */
-  openListedMember(docId: string): Promise<boolean> {
-    return this.workspaces.openListedMember(docId);
-  }
-
-  /** The set and file an unopened folder member's id names, or `null`. */
-  listedMember(docId: string): { setId: string; relPath: string } | null {
-    return this.workspaces.listedMember(docId);
   }
 
   openEditableFile(
@@ -3534,18 +3367,6 @@ export class DocStore {
       }
   > {
     return this.workspaces.openEditableFile(setId, relPath);
-  }
-
-  companionOf(docId: string): string | undefined {
-    return this.workspaces.companionOf(docId);
-  }
-
-  memberOfCompanion(docId: string): string | undefined {
-    return this.workspaces.memberOfCompanion(docId);
-  }
-
-  buildWorkspaceTree(setId: string): WorkspaceTree {
-    return this.workspaces.buildWorkspaceTree(setId);
   }
 
   listWorkspaces(now: number = Date.now()): Array<{
@@ -3577,49 +3398,10 @@ export class DocStore {
     return this.workspaces.deleteWorkspace(setId, opts);
   }
 
-  archiveReview(
-    setId: string,
-    opts: { archivedBy: string; reason?: string; linkedWorkspaces?: string[] },
-  ):
-    | { ok: true; archived: number; docIds: string[]; manifest: ArchivedReview }
-    | { ok: false; error: 'not-found' }
-    | { ok: false; error: 'archive-collision' | 'move-failed'; docIds: string[] } {
-    return this.workspaces.archiveReview(setId, opts);
-  }
-
-  unarchiveReview(
-    setId: string,
-    opts: { archivedBy: string },
-  ):
-    | { ok: true; restored: number; docIds: string[]; manifest: ArchivedReview }
-    | { ok: false; error: 'not-found' }
-    | { ok: false; error: 'restore-collision' | 'move-failed'; docIds: string[] } {
-    return this.workspaces.unarchiveReview(setId, opts);
-  }
-
-  archiveDoc(
-    docId: string,
-    opts: { archivedBy: string; reason?: string; linkedWorkspaces?: string[] },
-  ):
-    | { ok: true; docId: string; manifest: ArchivedDoc }
-    | { ok: false; error: 'not-found' | 'board-owned' | 'archive-collision' | 'move-failed' }
-    | { ok: false; error: 'review-member'; setId: string } {
-    return this.workspaces.archiveDoc(docId, opts);
-  }
-
   /** Whether `docId` is parked in the archive: its id is taken until it is
    *  put back, so nothing may create a fresh doc under it. */
   isArchivedDoc(docId: string): boolean {
     return this.state.has(docId, 'archive');
-  }
-
-  unarchiveDoc(
-    docId: string,
-    opts: { archivedBy: string },
-  ):
-    | { ok: true; docId: string; manifest: ArchivedDoc }
-    | { ok: false; error: 'not-found' | 'restore-collision' | 'move-failed' } {
-    return this.workspaces.unarchiveDoc(docId, opts);
   }
 
   /**
@@ -3664,42 +3446,6 @@ export class DocStore {
     const res = await bindDiffImpl(this, opts);
     if (res.ok) this.onSetRescanned?.(res.reviewId);
     return res;
-  }
-
-  /**
-   * Track a share-authorized socket that no doc's `conns` holds — the
-   * meeting's `/audio/<docId>` socket — so the sweeps below can close it.
-   * The set lives with the walk, in the fan-out.
-   */
-  trackShareSocket(ws: ShareAuthorizedSocket): void {
-    this.fanout.trackShareSocket(ws);
-  }
-
-  /** Drop a tracked socket — its `close` handler, whatever closed it. */
-  untrackShareSocket(ws: ShareAuthorizedSocket): void {
-    this.fanout.untrackShareSocket(ws);
-  }
-
-  /**
-   * Close every websocket a given share opened, and the two sweeps beside it.
-   * The docs are this store's; the sockets on them are the fan-out's, so the
-   * walk lives there and these keep the names their callers already use
-   * (`server.ts`, `routes/auth-share.ts`).
-   */
-  closeSocketsForShare(shareId: string): number {
-    return this.fanout.closeSocketsForShare(shareId);
-  }
-
-  closeSocketsForShareMembers(match: (memberKey: string) => boolean): number {
-    return this.fanout.closeSocketsForShareMembers(match);
-  }
-
-  closeSocketsForDeadShares(isLive: (shareId: string) => boolean): string[] {
-    return this.fanout.closeSocketsForDeadShares(isLive);
-  }
-
-  closeSocketsForDeadWidgetGrants(isLive: (token: string, origin: string) => boolean): number {
-    return this.fanout.closeSocketsForDeadWidgetGrants(isLive);
   }
 
   /** Re-reconcile a workspace against disk, keeping docIds (and therefore
@@ -3780,30 +3526,6 @@ export class DocStore {
     return this.bindings.attachReadonlyFileAsync(docId, filePath, opts);
   }
 
-  /** Bind a READ-ONLY source file (type='code') for review — no write-back. */
-  /** Watch a mockup's source HTML for edits. See
-   *  `FileBindings.attachMockupFile`. */
-  attachMockupFile(docId: string, filePath: string): ReturnType<FileBindings['attachMockupFile']> {
-    return this.bindings.attachMockupFile(docId, filePath);
-  }
-
-  attachReadonlyFile(
-    docId: string,
-    filePath: string,
-  ): { ok: boolean; error?: 'not-found' | 'path-empty' | 'read-failed'; resolvedPath?: string } {
-    return this.bindings.attachReadonlyFile(docId, filePath);
-  }
-
-  /** Bind a flat (code / working-tree diff) doc to a file; `writeBack` makes
-   *  the File view a live editor. */
-  attachFlatFile(
-    docId: string,
-    filePath: string,
-    opts: AttachOpts & { writeBack?: boolean } = {},
-  ): { ok: boolean; error?: 'not-found' | 'path-empty' | 'read-failed'; resolvedPath?: string } {
-    return this.bindings.attachFlatFile(docId, filePath, opts);
-  }
-
   /** Pin a doc to its origin repo: repo + branch + relPath. */
   setDocOriginRepo(
     docId: string,
@@ -3842,11 +3564,6 @@ export class DocStore {
       this.bindings.followMovedFile(doc, absPath, preread),
   };
 
-  /** Unpin: the doc keeps whatever binding it has. */
-  clearDocOriginRepo(docId: string): { ok: boolean } {
-    return this.bindings.clearDocOriginRepo(docId);
-  }
-
   /** The pin plus where it resolves right now — for doc status surfaces. */
   docOriginRepoStatus(docId: string):
     | {
@@ -3856,18 +3573,6 @@ export class DocStore {
       }
     | undefined {
     return this.bindings.docOriginRepoStatus(docId);
-  }
-
-  /** Force a re-parse of the bound file into the live doc. */
-  reparseFromDisk(docId: string): { ok: boolean; error?: 'not-found' | 'no-binding' | 'missing' } {
-    return this.bindings.reparseFromDisk(docId);
-  }
-
-  /** Run a disk→doc reconcile now and report the decision. */
-  reconcileNow(
-    docId: string,
-  ): 'in-sync' | 'catch-up' | 'apply' | 'conflict' | 'no-binding' | 'missing' {
-    return this.bindings.reconcileNow(docId);
   }
 
   /**
@@ -3907,12 +3612,6 @@ export class DocStore {
     const finding = prose.detectLiteralMarkdown(prose.getProseFragment(room.ydoc));
     if (!finding) return undefined;
     return { message: prose.literalMarkdownMessage(finding), at: Date.now() };
-  }
-
-  /** Bound documents whose write-back has been scheduled and has not fired —
-   *  what a deploy asks before it fast-forwards a checkout. */
-  pendingFileWrites(root?: string): { docId: string; path: string }[] {
-    return this.bindings.pendingFileWrites(root);
   }
 
   /**
@@ -4204,16 +3903,6 @@ export class DocStore {
     doc.humanEditSeq = (doc.humanEditSeq ?? 0) + 1;
   }
 
-  /** Run one scoped agent edit under the stale-write rule and the pre-edit
-   *  backup. See `DocEditOps.guardScopedEdit`. */
-  guardScopedEdit<R extends { ok: boolean }>(
-    docId: string,
-    guard: ScopedEditGuard | undefined,
-    run: () => R,
-  ): R | (R & { backup: string }) | ScopedEditRefusal {
-    return this.docEdits.guardScopedEdit(docId, guard, run);
-  }
-
   /** Record that `reader` fetched this doc's content (their copy is current
    *  as of `at`). Keyed by the author id the same caller sends on writes. */
   noteAgentRead(docId: string, reader: string, at: number = Date.now()): void {
@@ -4264,67 +3953,6 @@ export class DocStore {
   // follows is the store's public surface forwarding onto them, signatures
   // unchanged.
 
-  setDocContent(
-    docId: string,
-    markdown: string,
-  ): { ok: true } | { ok: false; error: 'not-found' | 'unsupported' | 'empty' | 'parse-failed' } {
-    return this.docEdits.setDocContent(docId, markdown);
-  }
-
-  findAndReplace(
-    docId: string,
-    opts: {
-      find: string;
-      replace: string;
-      contextBefore?: string;
-      contextAfter?: string;
-      occurrence?: number;
-      /** Replace EVERY occurrence in one transaction. See prose.findAndReplace. */
-      replaceAll?: boolean;
-      parseInlineMarks?: boolean;
-    },
-  ): prose.ReplaceResult {
-    return this.docEdits.findAndReplace(docId, opts);
-  }
-
-  rewriteThreadRegion(
-    docId: string,
-    threadId: string,
-    replacement: string,
-    opts?: { parseInlineMarks?: boolean },
-  ): prose.AnchoredEditResult {
-    return this.docEdits.rewriteThreadRegion(docId, threadId, replacement, opts);
-  }
-
-  createAgentAnchor(
-    docId: string,
-    opts: {
-      find: string;
-      contextBefore?: string;
-      contextAfter?: string;
-      occurrence?: number;
-      label?: string;
-    },
-  ): prose.CreateAnchorResult {
-    return this.docEdits.createAgentAnchor(docId, opts);
-  }
-
-  editAtAgentAnchor(
-    docId: string,
-    anchorId: string,
-    op: { kind: 'replace'; text: string } | { kind: 'insert_after'; text: string },
-  ): prose.AnchoredEditResult {
-    return this.docEdits.editAtAgentAnchor(docId, anchorId, op);
-  }
-
-  deleteAgentAnchor(docId: string, anchorId: string): boolean {
-    return this.docEdits.deleteAgentAnchor(docId, anchorId);
-  }
-
-  listSuggestions(docId: string): suggestOps.SuggestionSummary[] {
-    return this.docSuggests.listSuggestions(docId);
-  }
-
   createSuggestion(
     docId: string,
     opts: {
@@ -4347,29 +3975,6 @@ export class DocStore {
         candidates?: Array<{ docOffset: number; preview: string }>;
       } {
     return this.docSuggests.createSuggestion(docId, opts);
-  }
-
-  createSuggestionForThread(
-    docId: string,
-    threadId: string,
-    opts: {
-      replacement: string;
-      parseInlineMarks?: boolean;
-      author: suggestOps.SuggestionAuthor;
-      ts?: number;
-    },
-  ):
-    | { ok: true; suggestionId: string }
-    | { ok: false; error: 'anchor-not-found' | 'anchor-orphaned' | 'cross-block' } {
-    return this.docSuggests.createSuggestionForThread(docId, threadId, opts);
-  }
-
-  acceptSuggestion(docId: string, sid: string): suggestOps.SuggestionOpResult {
-    return this.docSuggests.acceptSuggestion(docId, sid);
-  }
-
-  rejectSuggestion(docId: string, sid: string): suggestOps.SuggestionOpResult {
-    return this.docSuggests.rejectSuggestion(docId, sid);
   }
 
   /**
@@ -4402,266 +4007,6 @@ export class DocStore {
     who: BlockEditsAuthor,
   ): BlockEditsResult {
     return this.docEdits.applyBlockEdits(docId, edits, who);
-  }
-
-  insertBlocksAtAnchor(
-    docId: string,
-    anchorId: string,
-    markdown: string,
-    opts?: { placement?: prose.BlockPlacement },
-  ): prose.AnchoredEditResult {
-    return this.docEdits.insertBlocksAtAnchor(docId, anchorId, markdown, opts);
-  }
-
-  insertAfterThread(docId: string, threadId: string, text: string): prose.AnchoredEditResult {
-    return this.docEdits.insertAfterThread(docId, threadId, text);
-  }
-
-  insertBlocksAfterThread(
-    docId: string,
-    threadId: string,
-    markdown: string,
-    opts?: { placement?: prose.BlockPlacement },
-  ): prose.AnchoredEditResult {
-    return this.docEdits.insertBlocksAfterThread(docId, threadId, markdown, opts);
-  }
-
-  deleteBlockAtThread(docId: string, threadId: string): prose.DeleteBlockResult {
-    return this.docEdits.deleteBlockAtThread(docId, threadId);
-  }
-
-  deleteBlockAtAgentAnchor(docId: string, anchorId: string): prose.DeleteBlockResult {
-    return this.docEdits.deleteBlockAtAgentAnchor(docId, anchorId);
-  }
-
-  deleteBlocksInRange(
-    docId: string,
-    opts: {
-      startFind: string;
-      endFind: string;
-      contextBefore?: string;
-      contextAfter?: string;
-      startOccurrence?: number;
-      endOccurrence?: number;
-    },
-  ): prose.DeleteBlocksInRangeResult {
-    return this.docEdits.deleteBlocksInRange(docId, opts);
-  }
-
-  deleteSection(
-    docId: string,
-    opts: { heading: string; level?: number; occurrence?: number },
-  ): prose.DeleteSectionResult {
-    return this.docEdits.deleteSection(docId, opts);
-  }
-
-  autoReanchor(docId: string): { checked: number; reanchored: number; stillOrphan: number } | null {
-    return this.docEdits.autoReanchor(docId);
-  }
-
-  /**
-   * Append a comment-family activity event (comment / reply / resolve /
-   * reopen) for a successful thread action. Both person and agent actions are
-   * recorded — agent events carry actor:'agent' so the Weekly Review agent can
-   * filter them, but person events are never dropped. Best-effort: any failure
-   * is swallowed so activity capture can't break the action it observes.
-   */
-  private recordActivity(
-    doc: LiveDoc,
-    type: ActivityType,
-    author: User,
-    threadId: string,
-    opts: { text?: string; tsMs: number },
-  ): void {
-    try {
-      const actor = classifyActor(author);
-      const ts = toUtcIso(opts.tsMs);
-      const payload: Event['payload'] =
-        opts.text !== undefined ? { text: opts.text, wordCount: wordCount(opts.text) } : {};
-      const id = eventId({
-        ts,
-        actor,
-        docId: doc.docId,
-        type,
-        threadId,
-        payloadDigest: payloadDigest(opts.text),
-      });
-      const event: Event = {
-        eventId: id,
-        ts,
-        type,
-        actor,
-        actorId: author.id,
-        actorName: author.name,
-        isOwner: isOwnerActor(author),
-        threadId,
-        doc: buildEventDoc(doc.meta),
-        payload,
-      };
-      appendActivity(this.cfg.dataDir, event);
-    } catch (err) {
-      console.error('[doc-store] recordActivity failed:', err);
-    }
-  }
-
-  /**
-   * Append a browser-originated reading event (read_session / doc_open). The
-   * client posts the interaction-bounded payload; the server resolves the doc
-   * / repo / producedBy and stamps actor=person, ts=now. Unknown `type`s are
-   * rejected so a malformed POST can't poison the stream.
-   */
-  recordReadEvent(
-    docId: string,
-    type: 'read_session' | 'doc_open',
-    payload: Event['payload'],
-    author: User,
-  ): { ok: boolean; error?: 'no-doc' | 'bad-type' | 'append-failed' } {
-    if (type !== 'read_session' && type !== 'doc_open') {
-      return { ok: false, error: 'bad-type' };
-    }
-    const doc = this.resolveDoc(docId);
-    if (!doc) return { ok: false, error: 'no-doc' };
-    try {
-      // Re-clamp the browser-supplied duration/scroll fields server-side so a
-      // spoofed or buggy POST can't write an inflated read time.
-      clampReadPayload(payload);
-      const ts = toUtcIso(Date.now());
-      const sessionId = payload.sessionId;
-      const id = eventId({
-        ts,
-        actor: 'person',
-        docId,
-        type,
-        threadId: null,
-        payloadDigest: payloadDigest(sessionId),
-      });
-      const event: Event = {
-        eventId: id,
-        ts,
-        type,
-        actor: 'person',
-        actorId: author.id,
-        actorName: author.name,
-        isOwner: isOwnerActor(author),
-        doc: buildEventDoc(doc.meta),
-        payload,
-      };
-      appendActivity(this.cfg.dataDir, event);
-      return { ok: true };
-    } catch (err) {
-      console.error('[doc-store] recordReadEvent failed:', err);
-      return { ok: false, error: 'append-failed' };
-    }
-  }
-
-  /** Append one closed edit session. The doc may have left memory by the
-   *  time a session closes, so its meta comes from the index when it has. */
-  private recordEditSession(session: ClosedEditSession): void {
-    const meta = this.docs.get(session.docId)?.meta ?? this.catalog.entry(session.docId)?.meta;
-    if (!meta) return;
-    appendActivity(this.cfg.dataDir, editSessionEvent(session, meta));
-  }
-
-  /**
-   * Summarize every already-existing thread that has no current summary.
-   *
-   * Generation is triggered by thread CHANGES, so nothing that was written
-   * before this feature shipped would ever get a summary — the docs with the
-   * worst deterministic topic lines are exactly the old ones. This walks the
-   * hydrated docs once and hands the backlog to the summarizer, which paces
-   * it over `windowMs`.
-   *
-   * Resolved threads are included: their cards still render both lines in the
-   * all-threads panel and the outdated-comments flow, and a summary is the
-   * whole point there too. They are counted separately so the operator sees
-   * what they are agreeing to pay for rather than one opaque total.
-   *
-   * Returns immediately with the count queued; the drain runs in the
-   * background. Never automatic — the caller (bin.ts) decides, because a
-   * backfill spends real money and must not fire in a test or a short-lived
-   * process.
-   */
-  backfillSummaries(opts: { windowMs?: number } = {}): {
-    queued: number;
-    open: number;
-    resolved: number;
-  } {
-    const summarizer = this.cfg.summarizer;
-    if (!summarizer?.enabled) return { queued: 0, open: 0, resolved: 0 };
-    const tasks: ScheduleArgs[] = [];
-    let open = 0;
-    let resolved = 0;
-    // Every doc on the server, not just the ones that happen to be in memory.
-    // Under lazy hydration those are two very different sets, and the whole
-    // point of this sweep is the OLD threads — which are exactly the ones in
-    // docs nobody has opened.
-    for (const docId of new Set([...this.catalog.ids(), ...this.docs.keys()])) {
-      // The index says how many threads a doc has, so a doc with none is
-      // skipped without loading it. On the measured corpus that is most of
-      // them, and it is the difference between a sweep that reads a few
-      // hundred docs and one that reads five thousand.
-      if (this.threadCounts(docId).total === 0) continue;
-      const wasResident = this.docs.has(docId);
-      const doc = this.resolveDoc(docId);
-      if (!doc) continue;
-      let queuedHere = 0;
-      for (const t of listThreads(doc.ydoc)) {
-        // Ask the same question the live path asks, so a thread summarized a
-        // second ago is not paid for twice.
-        if (!needsCall(t, t.summary)) continue;
-        if (t.status === 'open') open++;
-        else resolved++;
-        queuedHere++;
-        tasks.push({
-          docId,
-          threadId: t.id,
-          getThread: () => this.getThread(docId, t.id),
-          apply: (summary) => {
-            // Resolved again HERE, not captured above: this runs minutes
-            // later, spread over the pacing window, and the doc it was
-            // collected from may have been evicted since — writing into a
-            // destroyed Y.Doc would drop the summary silently.
-            const live = this.resolveDoc(docId);
-            if (!live) return;
-            setThreadSummary(live.ydoc, t.id, summary);
-            this.saveToDisk(live);
-          },
-        });
-      }
-      // Put back what this sweep pulled in and did not need. A doc that had
-      // work queued stays for now — `apply` is about to write to it — and the
-      // idle sweep takes it later on the ordinary clock.
-      if (!wasResident && queuedHere === 0) this.evictDoc(docId);
-    }
-    if (tasks.length > 0) {
-      void summarizer
-        .backfill(tasks, {
-          ...(opts.windowMs !== undefined ? { windowMs: opts.windowMs } : {}),
-        })
-        .then(({ attempted, stored }) => {
-          console.log(`[summarize] backfill done: ${stored} stored of ${attempted} attempted`);
-        })
-        // Nothing observes this promise. Every throw inside `backfill` is
-        // caught today, so this cannot fire — but it is one refactor away
-        // from being an unhandled rejection on a fire-and-forget path.
-        .catch((err) => {
-          console.error('[summarize] backfill failed:', err instanceof Error ? err.message : err);
-        });
-    }
-    return { queued: tasks.length, open, resolved };
-  }
-
-  /**
-   * Store a summary that was generated on demand (REST route / MCP tool).
-   * Same write and same persistence as the scheduled path — one way in, so
-   * an on-demand summary cannot end up in the doc but not on disk.
-   */
-  applyThreadSummary(docId: string, threadId: string, summary: StoredSummary): Thread | null {
-    const doc = this.resolveDoc(docId);
-    if (!doc) return null;
-    const t = setThreadSummary(doc.ydoc, threadId, summary);
-    if (t) this.saveToDisk(doc);
-    return t;
   }
 
   private stateStore: DocStateStore | undefined;

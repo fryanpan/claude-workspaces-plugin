@@ -120,7 +120,7 @@ describe('the poll’s change detection', () => {
     utimesSync(path, sameMs, sameMs);
     // Records this stamp as the poll's baseline, synchronously, so the case
     // does not depend on which sweep tick got there first.
-    expect(docStore.reconcileNow('d1')).toBe('apply');
+    expect(docStore.bindings.reconcileNow('d1')).toBe('apply');
     await untilLive('Same length, line A.');
     const before = statSync(path, { bigint: true });
 
@@ -145,7 +145,7 @@ describe('the poll’s change detection', () => {
     // external edit — that arm backs the user's own document up as though a
     // stranger had written it.
     expect(
-      docStore.findAndReplace('d1', {
+      docStore.docEdits.findAndReplace('d1', {
         find: 'Keep this sentence intact.',
         replace: 'Edited in the live doc.',
       }).ok,

@@ -84,7 +84,7 @@ async function seed(): Promise<Fixture> {
   for (const [i, docId] of DOCS.entries()) {
     first.docStore.getOrCreate(docId, { type: 'markdown', title: docId });
     const text = `# ${docId}\n\nSaltmarsh plan ${i} with enough words to count for a size.\n`;
-    expect(first.docStore.setDocContent(docId, text).ok).toBe(true);
+    expect(first.docStore.docEdits.setDocContent(docId, text).ok).toBe(true);
     expect(t.attachDoc(ws, docId).ok).toBe(true);
     const made = await first.docStore.createThreadByFind(
       docId,
@@ -167,7 +167,10 @@ describe('the board reads its cold docs without loading them', () => {
     expect(handle.docStore.peek(taskBodyDocId(id as string))).toBeUndefined();
     // An editor opens the cold body and rewrites it.
     expect(
-      handle.docStore.setDocContent(taskBodyDocId(id as string), 'Agent can moor at Riverbend.').ok,
+      handle.docStore.docEdits.setDocContent(
+        taskBodyDocId(id as string),
+        'Agent can moor at Riverbend.',
+      ).ok,
     ).toBe(true);
     await waitFor(() =>
       handle.tasks.getTask(id as string)?.body?.includes('moor at Riverbend') ? true : null,

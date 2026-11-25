@@ -166,7 +166,7 @@ export class TaskNotesStore {
    * Fold one interaction-bounded `read_session` into a task's cumulative
    * reading time. The LIVE path — called once per session flush, right
    * where the server already accepts the browser's `read_session` POST
-   * (see `docStore.recordReadEvent` and its caller in server.ts).
+   * (see `docStore.activity.recordReadEvent` and its caller in server.ts).
    *
    * Quiet like `recordArtifactCheck` and for the identical reason: no store
    * event, no `updatedAt` bump. A person reading a ticket must not reset

@@ -67,9 +67,9 @@ describe('a write-back whose data dir has gone', () => {
    * reaches the file at all in this harness.
    */
   it('positive control: the write-back reaches the bound file', async () => {
-    expect(docStore.findAndReplace('d1', { find: 'First line.', replace: 'Edited once.' }).ok).toBe(
-      true,
-    );
+    expect(
+      docStore.docEdits.findAndReplace('d1', { find: 'First line.', replace: 'Edited once.' }).ok,
+    ).toBe(true);
     await waitForFile(path, (t) => t.includes('Edited once.'));
   });
 
@@ -77,15 +77,15 @@ describe('a write-back whose data dir has gone', () => {
     // The bound file's own directory stays; only the data dir goes. That is
     // the shape the failure had: the write to the DOCUMENT succeeds and the
     // bookkeeping write that follows it is the one that cannot land.
-    expect(docStore.findAndReplace('d1', { find: 'First line.', replace: 'Edited once.' }).ok).toBe(
-      true,
-    );
+    expect(
+      docStore.docEdits.findAndReplace('d1', { find: 'First line.', replace: 'Edited once.' }).ok,
+    ).toBe(true);
     // Land INSIDE the gap between the two debounces. The `.ydoc` persist has
     // to run first — it is what stamps `pendingFileWrite` on the index row,
     // and `clearPendingFileWrite` returns early on a row without it, so a
     // data dir removed any earlier never reaches the write this test is about.
     await new Promise((r) => setTimeout(r, afterPersist()));
-    expect(docStore.pendingFileWrites().some((p) => p.docId === 'd1')).toBe(true);
+    expect(docStore.bindings.pendingFileWrites().some((p) => p.docId === 'd1')).toBe(true);
     rmSync(dataDir, { recursive: true, force: true });
     expect(existsSync(dataDir)).toBe(false);
 
@@ -98,7 +98,7 @@ describe('a write-back whose data dir has gone', () => {
     // ran, and the throw escaped as an unhandled rejection that bun charged
     // to whatever test was running next.
     expect(
-      docStore.findAndReplace('d1', { find: 'Edited once.', replace: 'Edited twice.' }).ok,
+      docStore.docEdits.findAndReplace('d1', { find: 'Edited once.', replace: 'Edited twice.' }).ok,
     ).toBe(true);
     await waitForFile(path, (t) => t.includes('Edited twice.'));
     expect(readFileSync(path, 'utf8')).toContain('Edited twice.');

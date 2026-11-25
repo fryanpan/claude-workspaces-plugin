@@ -117,7 +117,7 @@ export function createArchiveRoutes(ctx: ArchiveRoutesContext): {
       const boards = boardsLinking(meta.docId);
       if (boards.length > 0) memberWorkspaces[meta.docId] = boards;
     }
-    const res = docStore.archiveReview(setId, {
+    const res = docStore.workspaces.archiveReview(setId, {
       archivedBy: by,
       ...(reason !== undefined ? { reason } : {}),
       linkedWorkspaces: boardsLinking(setId),
@@ -229,7 +229,9 @@ export function createArchiveRoutes(ctx: ArchiveRoutesContext): {
       const setId = decodeURIComponent(reviewUnarchiveMatch[1] ?? '');
       const body = sent<ArchiveSetBody>(await safeJson(req));
       const author = body?.author as { name?: string } | undefined;
-      const res = docStore.unarchiveReview(setId, { archivedBy: author?.name ?? 'unknown' });
+      const res = docStore.workspaces.unarchiveReview(setId, {
+        archivedBy: author?.name ?? 'unknown',
+      });
       if (!res.ok) return j(res.error === 'not-found' ? 404 : 409, res);
       // Put the review back on every board it was on when it was archived,
       // and each individually-filed member back on the boards that had it —
@@ -259,7 +261,7 @@ export function createArchiveRoutes(ctx: ArchiveRoutesContext): {
       const body = sent<ArchiveDocBody>(await safeJson(req));
       const author = body?.author as { name?: string } | undefined;
       const reason = typeof body?.reason === 'string' ? (body.reason as string) : undefined;
-      const res = docStore.archiveDoc(docId, {
+      const res = docStore.workspaces.archiveDoc(docId, {
         archivedBy: author?.name ?? 'unknown',
         ...(reason !== undefined ? { reason } : {}),
         linkedWorkspaces: boardsLinking(docId),
@@ -282,7 +284,9 @@ export function createArchiveRoutes(ctx: ArchiveRoutesContext): {
       const docId = decodeURIComponent(docUnarchiveMatch[1] ?? '');
       const body = sent<ArchiveDocBody>(await safeJson(req));
       const author = body?.author as { name?: string } | undefined;
-      const res = docStore.unarchiveDoc(docId, { archivedBy: author?.name ?? 'unknown' });
+      const res = docStore.workspaces.unarchiveDoc(docId, {
+        archivedBy: author?.name ?? 'unknown',
+      });
       if (!res.ok) return j(res.error === 'not-found' ? 404 : 409, res);
       for (const workspaceId of res.manifest.linkedWorkspaces) {
         if (taskStore.attachDoc(workspaceId, docId).ok) taskProjection.ensureWorkspace(workspaceId);

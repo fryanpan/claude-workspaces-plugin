@@ -100,7 +100,9 @@ describe('hydrating a doc that holds duplicate block ids', () => {
       // Positive control: this store DOES write both files when the doc
       // changes, so the unchanged bytes above are an absence of writes, not a
       // binding that was never live.
-      expect(second.findAndReplace(DOC_ID, { find: 'tide', replace: 'Saltmarsh' }).ok).toBe(true);
+      expect(
+        second.docEdits.findAndReplace(DOC_ID, { find: 'tide', replace: 'Saltmarsh' }).ok,
+      ).toBe(true);
       await waitFor(() => readFileSync(mdPath, 'utf8').includes('Saltmarsh'), {
         describe: 'the edit to be written back to the .md',
       });

@@ -124,7 +124,7 @@ describe('an .mdx doc read before the MDX grammar', () => {
       'mdx: <Chart title="Saltmarsh crossings" />',
       'paragraph',
     ]);
-    expect(docStore.listSuggestions('post')).toHaveLength(1);
+    expect(docStore.docSuggests.listSuggestions('post')).toHaveLength(1);
     // timed: proving the write-back never fires, so nothing to poll for.
     await sleep(pastWriteBack());
     expect(readFileSync(path, 'utf8')).toBe(disk);
@@ -174,9 +174,9 @@ describe('an .mdx doc read before the MDX grammar', () => {
   it('a reparse of that doc keeps its pending suggestion', async () => {
     const { path } = await legacyDoc('post');
     expect((await docStore.attachFileAsync('post', path)).ok).toBe(true);
-    expect(docStore.reparseFromDisk('post').ok).toBe(true);
+    expect(docStore.bindings.reparseFromDisk('post').ok).toBe(true);
     expect(blocksOf('post')).toContain('mdx: <Chart title="Saltmarsh crossings" />');
-    expect(docStore.listSuggestions('post')).toHaveLength(1);
+    expect(docStore.docSuggests.listSuggestions('post')).toHaveLength(1);
   });
 
   it('JSX inserted after a thread lands as a block of its exact lines, on disk too', async () => {
@@ -199,7 +199,7 @@ describe('an .mdx doc read before the MDX grammar', () => {
     });
     const winter = '<BarChart\n  title="Winter sailings"\n  data={[{ x: 1, y: 40 }]}\n/>';
 
-    expect(docStore.insertBlocksAfterThread('post', 't-add', winter).ok).toBe(true);
+    expect(docStore.docEdits.insertBlocksAfterThread('post', 't-add', winter).ok).toBe(true);
 
     expect(blocksOf('post').at(-1)).toBe(`mdx: ${winter}`);
     await waitFor(() => readFileSync(path, 'utf8').includes(winter), {
@@ -210,11 +210,11 @@ describe('an .mdx doc read before the MDX grammar', () => {
   it('JSX inserted at an agent anchor lands as a block', async () => {
     const { path } = await legacyDoc('post');
     expect((await docStore.attachFileAsync('post', path)).ok).toBe(true);
-    const anchor = docStore.createAgentAnchor('post', { find: 'where those riders went' });
+    const anchor = docStore.docEdits.createAgentAnchor('post', { find: 'where those riders went' });
     if (!anchor.anchorId) throw new Error(`anchor: ${anchor.error}`);
     const note = '{/* TODO: the spring numbers */}';
 
-    expect(docStore.insertBlocksAtAnchor('post', anchor.anchorId, note).ok).toBe(true);
+    expect(docStore.docEdits.insertBlocksAtAnchor('post', anchor.anchorId, note).ok).toBe(true);
 
     expect(blocksOf('post').at(-1)).toBe(`mdx: ${note}`);
   });

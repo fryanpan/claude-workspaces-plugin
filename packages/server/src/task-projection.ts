@@ -603,7 +603,7 @@ export class TaskProjection {
         { authority: 'server' },
       );
       if (prose.getProseFragment(doc.ydoc).length === 0 && body?.trim()) {
-        this.docStore.setDocContent(docId, body);
+        this.docStore.docEdits.setDocContent(docId, body);
       }
     } finally {
       this.seeding.delete(docId);

@@ -62,7 +62,7 @@ describe('resolve_all hands the event loop back while it runs', () => {
       });
       expect(made.ok).toBe(true);
     }
-    expect(docStore.listSuggestions('rg1')).toHaveLength(words.length);
+    expect(docStore.docSuggests.listSuggestions('rg1')).toHaveLength(words.length);
   });
 
   afterEach(() => {
@@ -112,7 +112,7 @@ describe('resolve_all hands the event loop back while it runs', () => {
     if (!res.ok) return;
     expect(res.resolved).toBe(words.length);
     expect(res.sids).toHaveLength(words.length);
-    expect(docStore.listSuggestions('rg1')).toHaveLength(0);
+    expect(docStore.docSuggests.listSuggestions('rg1')).toHaveLength(0);
   });
 
   it('rejecting every proposal restores the original text', async () => {
@@ -120,7 +120,7 @@ describe('resolve_all hands the event loop back while it runs', () => {
     expect(res.ok).toBe(true);
     if (!res.ok) return;
     expect(res.resolved).toBe(words.length);
-    expect(docStore.listSuggestions('rg1')).toHaveLength(0);
+    expect(docStore.docSuggests.listSuggestions('rg1')).toHaveLength(0);
     const body = docStore.readMarkdownBody('rg1') ?? '';
     for (const w of words) expect(body).toContain(`Para ${w} here.`);
     expect(body).not.toContain('-done');
@@ -144,16 +144,16 @@ describe('resolve_all hands the event loop back while it runs', () => {
     if (!res.ok) return;
     expect(res.resolved).toBe(1);
     // Everything agent-1 proposed is still pending.
-    expect(docStore.listSuggestions('rg1')).toHaveLength(words.length);
+    expect(docStore.docSuggests.listSuggestions('rg1')).toHaveLength(words.length);
   });
 
   it('a proposal resolved by somebody else mid-pass is skipped, not counted', async () => {
-    const pending = docStore.listSuggestions('rg1');
+    const pending = docStore.docSuggests.listSuggestions('rg1');
     const victim = pending[0]?.sid ?? '';
     expect(victim).not.toBe('');
     // Resolve one out from under the pass before it starts — the same race a
     // yielding pass now makes reachable from another request.
-    expect(docStore.acceptSuggestion('rg1', victim)).toEqual({ ok: true });
+    expect(docStore.docSuggests.acceptSuggestion('rg1', victim)).toEqual({ ok: true });
 
     const res = await docStore.resolveAllSuggestions('rg1', { action: 'accept' }, timeSlice(0));
     expect(res.ok).toBe(true);

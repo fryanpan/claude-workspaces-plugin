@@ -156,21 +156,21 @@ export function createSocketHandlers(ctx: SocketHandlersContext): WebSocketHandl
       if (ws.data.kind === 'recall') return;
       if (ws.data.kind === 'app') {
         // In no doc's `conns`, so a revoked share reaches it only from here.
-        docStore.trackShareSocket(ws);
+        docStore.fanout.trackShareSocket(ws);
         ws.data.appLink?.attach(ws);
         return;
       }
       if (ws.data.kind === 'spoken') {
         // Tracked for the reason the voice socket is: it spends an engine
         // while open and joins no doc's `conns`.
-        docStore.trackShareSocket(ws);
+        docStore.fanout.trackShareSocket(ws);
         spokenRelay.onOpen(ws);
         return;
       }
       if (ws.data.kind === 'app-voice') {
         // Tracked for the spoken socket's reason, so a door socket whose
         // board token dies is hung up by the sweep.
-        docStore.trackShareSocket(ws);
+        docStore.fanout.trackShareSocket(ws);
         appVoiceRelay.onOpen(ws);
         return;
       }
@@ -178,7 +178,7 @@ export function createSocketHandlers(ctx: SocketHandlersContext): WebSocketHandl
         // In no doc's `conns`, so the sweeps can only reach it if it is
         // handed to them here — the same reason the audio socket is tracked
         // below. A socket carrying no grant and no share is not tracked.
-        docStore.trackShareSocket(ws);
+        docStore.fanout.trackShareSocket(ws);
         return;
       }
       if (ws.data.kind === 'audio') {
@@ -186,7 +186,7 @@ export function createSocketHandlers(ctx: SocketHandlersContext): WebSocketHandl
         // WeakMap nothing can enumerate: this is what makes the socket
         // reachable by the share sweeps in `doc-store.ts`. A socket carrying
         // neither stamp — the owner's — is not tracked at all.
-        docStore.trackShareSocket(ws);
+        docStore.fanout.trackShareSocket(ws);
         meetingRelay.onOpen(ws);
         return;
       }
@@ -292,27 +292,27 @@ export function createSocketHandlers(ctx: SocketHandlersContext): WebSocketHandl
         return;
       }
       if (ws.data.kind === 'app') {
-        docStore.untrackShareSocket(ws);
+        docStore.fanout.untrackShareSocket(ws);
         ws.data.appLink?.clientClosed(code, reason);
         return;
       }
       if (ws.data.kind === 'spoken') {
-        docStore.untrackShareSocket(ws);
+        docStore.fanout.untrackShareSocket(ws);
         spokenRelay.onClose(ws, code);
         return;
       }
       if (ws.data.kind === 'app-voice') {
-        docStore.untrackShareSocket(ws);
+        docStore.fanout.untrackShareSocket(ws);
         appVoiceRelay.onClose(ws);
         return;
       }
       if (ws.data.kind === 'voice') {
-        docStore.untrackShareSocket(ws);
+        docStore.fanout.untrackShareSocket(ws);
         voiceRelay.onClose(ws, code);
         return;
       }
       if (ws.data.kind === 'audio') {
-        docStore.untrackShareSocket(ws);
+        docStore.fanout.untrackShareSocket(ws);
         // The code and the peer's reason are the ONLY evidence that tells a
         // tab closing from a network that went away, and the relay's log is
         // where a run of drops is read back. Nothing else on this server sees

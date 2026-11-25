@@ -56,7 +56,7 @@ describe('write-back keeps the bytes of blocks the edit did not touch', () => {
   }
 
   function edit(docId: string, find: string, replace: string): void {
-    expect(docStore.findAndReplace(docId, { find, replace }).ok).toBe(true);
+    expect(docStore.docEdits.findAndReplace(docId, { find, replace }).ok).toBe(true);
   }
 
   it('an .mdx post: one paragraph edited, imports, exports, JSX and lists unchanged', async () => {
@@ -92,7 +92,7 @@ describe('write-back keeps the bytes of blocks the edit did not touch', () => {
     // can only do if the base moved to the bytes the reconcile read.
     const external = MD.replace('The ferry', 'Tickets are sold\non board.\n\nThe ferry');
     writeFileSync(path, external);
-    expect(docStore.reconcileNow('notes.md')).toBe('apply');
+    expect(docStore.bindings.reconcileNow('notes.md')).toBe('apply');
     edit('notes.md', 'runs hourly', 'runs every half hour');
     await waitForFileToBe(path, external.replace('runs hourly', 'runs every half hour'));
   });

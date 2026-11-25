@@ -68,7 +68,7 @@ describe('reparseFromDisk (markdown)', () => {
     // The block diff correctly sees this block as unchanged (a string '1' and
     // a number 1 both serialize to `# Title`), so reparse must repair the
     // attribute itself — otherwise force-pulling a legacy doc leaves it broken.
-    expect(docStore.reparseFromDisk('d1').ok).toBe(true);
+    expect(docStore.bindings.reparseFromDisk('d1').ok).toBe(true);
     expect(heading.getAttribute('level')).toBe(1 as unknown as string);
   });
 
@@ -83,7 +83,7 @@ describe('reparseFromDisk (markdown)', () => {
 
     // An agent rewrites a different part of the file, then force-pulls it.
     writeFileSync(path, DOC.replace('Old body text.', 'Rewritten body text, much longer now.'));
-    expect(docStore.reparseFromDisk('d1').ok).toBe(true);
+    expect(docStore.bindings.reparseFromDisk('d1').ok).toBe(true);
 
     const thread = docStore.listThreads('d1')[0];
     expect(thread?.anchor.kind).toBe('text-range');
@@ -100,7 +100,7 @@ describe('reparseFromDisk (markdown)', () => {
 
   it('picks up new content and heading levels from disk', () => {
     writeFileSync(path, `${DOC}\n### Added later\n\nMore text.\n`);
-    expect(docStore.reparseFromDisk('d1').ok).toBe(true);
+    expect(docStore.bindings.reparseFromDisk('d1').ok).toBe(true);
 
     const fragment = getProseFragment(docStore.get('d1')!.ydoc);
     const headings = (fragment.toArray() as Y.XmlElement[]).filter((b) => b.nodeName === 'heading');

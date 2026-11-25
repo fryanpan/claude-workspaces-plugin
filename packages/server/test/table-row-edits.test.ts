@@ -140,7 +140,7 @@ describe('editing the rows of a table in a bound doc', () => {
   }
 
   it('find_and_replace adds a row when replace holds one more pipe row than find', async () => {
-    const res = docStore.findAndReplace('ferries', {
+    const res = docStore.docEdits.findAndReplace('ferries', {
       find: '| Saltmarsh | 1 | weekends only |',
       replace: '| Saltmarsh | 1 | weekends only |\n| Riverbend | 3 | daily |',
     });
@@ -162,7 +162,7 @@ describe('editing the rows of a table in a bound doc', () => {
   });
 
   it('a row can be added above the matched row too', () => {
-    const res = docStore.findAndReplace('ferries', {
+    const res = docStore.docEdits.findAndReplace('ferries', {
       find: '| Saltmarsh | 1 | weekends only |',
       replace: '| Riverbend | 3 | daily |\n| Saltmarsh | 1 | weekends only |',
     });
@@ -173,7 +173,7 @@ describe('editing the rows of a table in a bound doc', () => {
   });
 
   it('editing a cell of the thread’s row while adding a row keeps the thread', () => {
-    const res = docStore.findAndReplace('ferries', {
+    const res = docStore.docEdits.findAndReplace('ferries', {
       find: '| Harborlight | 2 | Riverbend crossing |',
       replace: '| Harborlight | 4 | Riverbend crossing |\n| Riverbend | 3 | daily |',
     });
@@ -189,7 +189,7 @@ describe('editing the rows of a table in a bound doc', () => {
   });
 
   it('an empty replace removes the matched row, on disk too', async () => {
-    const res = docStore.findAndReplace('ferries', {
+    const res = docStore.docEdits.findAndReplace('ferries', {
       find: '| Saltmarsh | 1 | weekends only |',
       replace: '',
     });
@@ -204,7 +204,7 @@ describe('editing the rows of a table in a bound doc', () => {
   });
 
   it('a replace with a different number of cells per row is still refused, naming the fix', () => {
-    const res = docStore.findAndReplace('ferries', {
+    const res = docStore.docEdits.findAndReplace('ferries', {
       find: '| Saltmarsh | 1 | weekends only |',
       replace: '| Saltmarsh | 1 |',
     });
@@ -216,7 +216,7 @@ describe('editing the rows of a table in a bound doc', () => {
   });
 
   it('removing every row of a table is refused, naming the verb that removes a table', () => {
-    const res = docStore.findAndReplace('ferries', {
+    const res = docStore.docEdits.findAndReplace('ferries', {
       find: '| Route | Boats | Note |\n| Harborlight | 2 | Riverbend crossing |\n| Saltmarsh | 1 | weekends only |',
       replace: '',
     });
@@ -228,7 +228,7 @@ describe('editing the rows of a table in a bound doc', () => {
   });
 
   it('removing the header row is refused, so the editor and the file keep one header', () => {
-    const res = docStore.findAndReplace('ferries', {
+    const res = docStore.docEdits.findAndReplace('ferries', {
       find: '| Route | Boats | Note |',
       replace: '',
     });
@@ -239,7 +239,7 @@ describe('editing the rows of a table in a bound doc', () => {
   });
 
   it('adding a row above the header is refused for the same reason', () => {
-    const res = docStore.findAndReplace('ferries', {
+    const res = docStore.docEdits.findAndReplace('ferries', {
       find: '| Route | Boats | Note |',
       replace: '| Riverbend | 3 | daily |\n| Route | Boats | Note |',
     });
@@ -250,7 +250,7 @@ describe('editing the rows of a table in a bound doc', () => {
   });
 
   it('a row can be added directly below the header', () => {
-    const res = docStore.findAndReplace('ferries', {
+    const res = docStore.docEdits.findAndReplace('ferries', {
       find: '| Route | Boats | Note |',
       replace: '| Route | Boats | Note |\n| Riverbend | 3 | daily |',
     });
@@ -267,7 +267,7 @@ describe('editing the rows of a table in a bound doc', () => {
     });
     expect(suggested.ok).toBe(true);
 
-    const res = docStore.findAndReplace('ferries', {
+    const res = docStore.docEdits.findAndReplace('ferries', {
       find: '| Saltmarsh | 1 | weekends only |',
       replace: '',
     });
@@ -275,11 +275,11 @@ describe('editing the rows of a table in a bound doc', () => {
     expect(res.ok).toBe(false);
     expect(res.message).toContain('pending suggestion');
     expect(rows()).toHaveLength(3);
-    expect(docStore.listSuggestions('ferries')).toHaveLength(1);
+    expect(docStore.docSuggests.listSuggestions('ferries')).toHaveLength(1);
   });
 
   it('a whitespace-only replace is refused rather than read as a removal', () => {
-    const res = docStore.findAndReplace('ferries', {
+    const res = docStore.docEdits.findAndReplace('ferries', {
       find: '| Saltmarsh | 1 | weekends only |',
       replace: '  \n',
     });
@@ -290,10 +290,10 @@ describe('editing the rows of a table in a bound doc', () => {
   });
 
   it('insert_blocks_at_anchor on a word in a cell inserts after the table, not into the cell', async () => {
-    const anchor = docStore.createAgentAnchor('ferries', { find: 'weekends only' });
+    const anchor = docStore.docEdits.createAgentAnchor('ferries', { find: 'weekends only' });
     if (!anchor.anchorId) throw new Error(`anchor: ${anchor.error}`);
 
-    const res = docStore.insertBlocksAtAnchor(
+    const res = docStore.docEdits.insertBlocksAtAnchor(
       'ferries',
       anchor.anchorId,
       'Summer sailings start in May.',

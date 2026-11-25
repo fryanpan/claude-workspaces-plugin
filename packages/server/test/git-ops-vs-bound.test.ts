@@ -221,7 +221,7 @@ describe('git operations against a bound doc', () => {
     /** Make a live edit that has not yet reached disk (800ms write debounce). */
     function liveEdit(find: string): void {
       expect(
-        docStore.findAndReplace('d1', { find, replace: 'Live edit, not yet flushed.' }).ok,
+        docStore.docEdits.findAndReplace('d1', { find, replace: 'Live edit, not yet flushed.' }).ok,
       ).toBe(true);
     }
 
@@ -304,7 +304,7 @@ describe('git operations against a bound doc', () => {
       docStore.getOrCreate('d3', { type: 'markdown', sourceUrl: clonePath });
       expect(docStore.attachFile('d3', clonePath).ok).toBe(true);
       expect(
-        docStore.findAndReplace('d3', {
+        docStore.docEdits.findAndReplace('d3', {
           find: 'Intro paragraph on main.',
           replace: 'Live edit, not yet flushed.',
         }).ok,
@@ -344,7 +344,7 @@ describe('git operations against a bound doc', () => {
       });
       const message = docStore.getSyncError('d1')?.message ?? '';
 
-      expect(docStore.reparseFromDisk('d1').ok).toBe(true); // ...and yet:
+      expect(docStore.bindings.reparseFromDisk('d1').ok).toBe(true); // ...and yet:
       expect(liveText()).toContain('Live edit, not yet flushed.');
       expect(liveText()).not.toContain('Intro paragraph on the other branch.');
       // Worse than a no-op: the reparse clears the syncError, so following this
@@ -443,7 +443,7 @@ describe('a flush inside the read debounce cannot overwrite unread bytes', () =>
 
   it('the checked-out version is backed up and blamed on git, not silently lost', () => {
     expect(
-      docStore.findAndReplace('d1', {
+      docStore.docEdits.findAndReplace('d1', {
         find: 'Intro paragraph on main.',
         replace: 'Live edit, not yet flushed.',
       }).ok,

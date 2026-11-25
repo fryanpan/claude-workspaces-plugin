@@ -61,7 +61,7 @@ describe('the bound-file write lane', () => {
       decorateDocMeta: (m) => ({ ...m, reviewUrl: `http://test/review/${m.docId}` }),
     });
     docStore.getOrCreate('n1', { type: 'code', sourceUrl: path });
-    expect(docStore.attachFlatFile('n1', path, { writeBack: true }).ok).toBe(true);
+    expect(docStore.bindings.attachFlatFile('n1', path, { writeBack: true }).ok).toBe(true);
   });
 
   afterEach(async () => {
@@ -96,13 +96,13 @@ describe('the bound-file write lane', () => {
       // Before the debounce fires this is pending because a timer is armed —
       // the positive control for the assertion below, which must hold for a
       // different reason.
-      expect(docStore.pendingFileWrites()).toHaveLength(1);
+      expect(docStore.bindings.pendingFileWrites()).toHaveLength(1);
 
       await waitFor(() => started === 1, { describe: 'the write-back to reach the pool' });
       // No timer now, and nothing on disk yet. This is the state that used to
       // read as "nothing to do".
       expect(readFileSync(path, 'utf8')).toBe('first line\n');
-      expect(docStore.pendingFileWrites().map((w) => w.docId)).toEqual(['n1']);
+      expect(docStore.bindings.pendingFileWrites().map((w) => w.docId)).toEqual(['n1']);
 
       // `flush()` cannot await the pool, so it writes synchronously. What it
       // must not do is skip.
@@ -197,7 +197,7 @@ describe('the bound-file write lane', () => {
     writeFileSync(member, 'fun member() {}\n');
 
     docStore.getOrCreate('m1', { type: 'code', sourceUrl: member });
-    expect(docStore.attachFlatFile('m1', member)).toMatchObject({
+    expect(docStore.bindings.attachFlatFile('m1', member)).toMatchObject({
       ok: false,
       error: 'read-failed',
     });
@@ -208,7 +208,7 @@ describe('the bound-file write lane', () => {
     // backoff is forgotten, so the refusal above is the quarantine talking
     // and not something else about this path.
     boundFiles.reset();
-    expect(docStore.attachFlatFile('m1', member).ok).toBe(true);
+    expect(docStore.bindings.attachFlatFile('m1', member).ok).toBe(true);
     expect(docStore.get('m1')?.ydoc.getText('content').toString()).toBe('fun member() {}\n');
   });
 });

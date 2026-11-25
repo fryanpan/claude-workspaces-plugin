@@ -83,7 +83,7 @@ describe('flat write-back', () => {
   });
 
   it('writeBack: an edit to the content Y.Text lands in the file', async () => {
-    expect(docStore.attachFlatFile('c1', path, { writeBack: true }).ok).toBe(true);
+    expect(docStore.bindings.attachFlatFile('c1', path, { writeBack: true }).ok).toBe(true);
     const content = docStore.get('c1')?.ydoc.getText('content');
     expect(content?.toString()).toBe(SRC);
     content?.insert(SRC.indexOf('one'), 'edited-');
@@ -91,7 +91,7 @@ describe('flat write-back', () => {
   });
 
   it('read-only attach: an edit to the content Y.Text never touches the file', async () => {
-    expect(docStore.attachReadonlyFile('c1', path).ok).toBe(true);
+    expect(docStore.bindings.attachReadonlyFile('c1', path).ok).toBe(true);
     docStore.get('c1')?.ydoc.getText('content').insert(0, 'INJECTED ');
     // timed: the assertion is that NOTHING lands, so the full write-back
     // window (~800ms) has to elapse before the file can be believed.
@@ -100,7 +100,7 @@ describe('flat write-back', () => {
   });
 
   it('external edits still flow in, and the write-back does not echo them back out', async () => {
-    expect(docStore.attachFlatFile('c1', path, { writeBack: true }).ok).toBe(true);
+    expect(docStore.bindings.attachFlatFile('c1', path, { writeBack: true }).ok).toBe(true);
     const changed = SRC.replace('two', 'three');
     writeFileSync(path, changed);
     // The file poll (500ms) plus the read debounce (150ms) put the external
@@ -117,10 +117,10 @@ describe('flat write-back', () => {
   });
 
   it('conflict: un-flushed live edit + external write keeps live, backs up external, sets syncError', async () => {
-    expect(docStore.attachFlatFile('c1', path, { writeBack: true }).ok).toBe(true);
+    expect(docStore.bindings.attachFlatFile('c1', path, { writeBack: true }).ok).toBe(true);
     docStore.get('c1')?.ydoc.getText('content').insert(0, '// live edit\n');
     writeFileSync(path, SRC.replace('two', 'external'));
-    expect(docStore.reconcileNow('c1')).toBe('conflict');
+    expect(docStore.bindings.reconcileNow('c1')).toBe('conflict');
     // Live wins on disk...
     await waitForFile(path, (t) => t.includes('// live edit'));
     // ...and the external version survives in clobber-backups.
@@ -132,9 +132,9 @@ describe('flat write-back', () => {
   });
 
   it('re-attach does not stack duplicate content observers', async () => {
-    expect(docStore.attachFlatFile('c1', path, { writeBack: true }).ok).toBe(true);
-    expect(docStore.attachFlatFile('c1', path, { writeBack: true }).ok).toBe(true);
-    expect(docStore.attachFlatFile('c1', path, { writeBack: true }).ok).toBe(true);
+    expect(docStore.bindings.attachFlatFile('c1', path, { writeBack: true }).ok).toBe(true);
+    expect(docStore.bindings.attachFlatFile('c1', path, { writeBack: true }).ok).toBe(true);
+    expect(docStore.bindings.attachFlatFile('c1', path, { writeBack: true }).ok).toBe(true);
     // One observer means one write per change: mutate once, then confirm the
     // file settles to exactly the doc's content (duplicates with stale
     // bindings would race and can resurrect old bytes).
@@ -233,7 +233,7 @@ describe('flat write-back through bindDiff', () => {
     expect(docStore.getDoc(opened.docId)?.plainText).toContain('Body changed.');
     // Edits made in the full markdown editor flow to the working tree...
     expect(
-      docStore.findAndReplace(opened.docId, {
+      docStore.docEdits.findAndReplace(opened.docId, {
         find: 'Body changed.',
         replace: 'Body edited in File view.',
       }).ok,
@@ -242,7 +242,7 @@ describe('flat write-back through bindDiff', () => {
     // ...and from there into the diff member's flat content (redline/diff
     // re-render), closing the loop.
     const mdId = res.files.find((f) => f.relPath === 'README.md')?.docId ?? '';
-    docStore.reconcileNow(mdId);
+    docStore.bindings.reconcileNow(mdId);
     expect(docStore.get(mdId)?.ydoc.getText('content').toString()).toContain(
       'Body edited in File view.',
     );
@@ -313,7 +313,7 @@ describe('flat write-back through bindDiff', () => {
         )
       ).ok,
     ).toBe(true);
-    const tree = docStore.buildWorkspaceTree(res.reviewId);
+    const tree = docStore.workspaces.buildWorkspaceTree(res.reviewId);
     const readmes = tree.tree.children.filter(
       (c): c is Extract<typeof c, { type: 'file' }> =>
         c.type === 'file' && c.relPath === 'README.md',

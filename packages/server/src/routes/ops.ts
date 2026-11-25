@@ -162,7 +162,7 @@ export async function handleSummaryBackfillRoute(
     const body = await safeJson(req);
     const minutes = Number(body?.windowMinutes ?? 15);
     const windowMs = (Number.isFinite(minutes) && minutes > 0 ? minutes : 15) * 60_000;
-    const { queued, open, resolved } = docStore.backfillSummaries({ windowMs });
+    const { queued, open, resolved } = docStore.activity.backfillSummaries({ windowMs });
     return j(200, { ok: true, queued, open, resolved, windowMs });
   }
   return undefined;

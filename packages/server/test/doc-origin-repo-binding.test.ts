@@ -306,7 +306,7 @@ describe('doc origin repos through the binding', () => {
     git(wt, 'checkout', '-b', 'feature-detour');
     writeFileSync(join(wt, REL), '# Somebody else\n\nfeature-branch copy\n');
 
-    const res = docStore.reparseFromDisk('d1');
+    const res = docStore.bindings.reparseFromDisk('d1');
     expect(res.ok).toBe(false);
     expect(docText(docStore, 'd1')).toContain('first pass');
     expect(docText(docStore, 'd1')).not.toContain('feature-branch copy');
@@ -315,7 +315,7 @@ describe('doc origin repos through the binding', () => {
     // parking — it follows the home, not the stale path.
     const wt2 = join(tmp, 'wt-plans-again');
     git(main, 'worktree', 'add', wt2, 'plans');
-    expect(docStore.reparseFromDisk('d1').ok).toBe(true);
+    expect(docStore.bindings.reparseFromDisk('d1').ok).toBe(true);
     expect(docStore.docOriginRepoStatus('d1')?.boundPath).toBe(join(wt2, REL));
     expect(docText(docStore, 'd1')).toContain('first pass');
   });

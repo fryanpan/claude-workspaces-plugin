@@ -167,7 +167,7 @@ describe('a minute in a planning meeting', () => {
     const cookie = await signIn(OWNER);
     const r = await post(`/workspaces/${boardId}/huddles`, { kind: 'plan' });
     const docId = ((await r.json()) as { docId: string }).docId;
-    expect(handle.docStore.setDocContent(docId, PLAN)).toEqual({ ok: true });
+    expect(handle.docStore.docEdits.setDocContent(docId, PLAN)).toEqual({ ok: true });
     const audio = await socket(`${wsBase}${meetingSocketPath(boardId, docId)}`);
     audio.ws.send(
       JSON.stringify({

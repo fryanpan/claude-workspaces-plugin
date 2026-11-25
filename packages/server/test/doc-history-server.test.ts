@@ -378,9 +378,9 @@ describe('a delete that destroys a doc takes its history with it', () => {
     expect(r.status).toBe(200);
     const yhist = join(historyDir(dataDir), `${docId}.yhist`);
     await waitFor(() => existsSync(yhist), { describe: 'the doc to have history' });
-    expect(handle.docStore.archiveDoc(docId, { archivedBy: 'Alice', reason: 'done' }).ok).toBe(
-      true,
-    );
+    expect(
+      handle.docStore.workspaces.archiveDoc(docId, { archivedBy: 'Alice', reason: 'done' }).ok,
+    ).toBe(true);
     expect(existsSync(yhist)).toBe(true);
   });
 });

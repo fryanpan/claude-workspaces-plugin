@@ -148,7 +148,7 @@ export async function handleDocResourceCore(
     const owner = itemsBoard !== undefined && rq.requireOwner(itemsBoard) === null;
     const linkedItems = itemsBoard ? ctx.pageOpened(itemsBoard, docId, owner) : [];
     return j(200, {
-      meta: metaFor({ ...doc.meta, lastActivityAt: docStore.activityAt(docId) }),
+      meta: metaFor({ ...doc.meta, lastActivityAt: docStore.catalog.activityAt(docId) }),
       ...(taskRefs.length > 0 ? { tasks: taskRefs } : {}),
       ...(boardWs ? { hubWorkspaceId: boardWs } : {}),
       ...(lead !== undefined ? { leadAgentId: lead } : {}),
@@ -176,7 +176,7 @@ export async function handleDocResourceCore(
     // member because that is the id it was handed; answer for the
     // file, and tag each companion thread with the doc it lives on
     // so a reply lands there. Member threads keep their shape.
-    const companionId = docStore.companionOf(docId);
+    const companionId = docStore.workspaces.companionOf(docId);
     if (companionId) {
       for (const t of docStore.listThreads(companionId, filter)) {
         threads.push({ ...withTaskChips(companionId, t), docId: companionId });
@@ -319,7 +319,7 @@ export async function handleDocResourceCore(
     // same insertion an agent's insert_blocks_after_thread makes.
     // Top-level: a selection inside a bullet must not nest a
     // heading inside that bullet; the section goes after the list.
-    const placed = docStore.insertBlocksAfterThread(
+    const placed = docStore.docEdits.insertBlocksAfterThread(
       docId,
       thread.id,
       researchPlaceholderMarkdown(topic),
@@ -353,7 +353,7 @@ export async function handleDocResourceCore(
       return j(200, { docId, home: res.home, placement: res.placement });
     }
     if (req.method === 'DELETE') {
-      const res = docStore.clearDocOriginRepo(docId);
+      const res = docStore.bindings.clearDocOriginRepo(docId);
       return res.ok ? j(200, { docId, ok: true }) : j(404, { error: 'no home pinned' });
     }
     return j(405, { error: 'method not allowed' });
@@ -463,7 +463,7 @@ export async function handleDocResourceCore(
     // activity as his — the one identity on the server that carries
     // any weight. An unattributed read is now unattributed.
     const author = authorFor(body?.author) ?? ANONYMOUS_ACTOR;
-    const res = docStore.recordReadEvent(docId, type, payload, author);
+    const res = docStore.activity.recordReadEvent(docId, type, payload, author);
     // Fold a successful task read_session onto the task record's
     // cumulative reading time. `recordReadEvent` clamps `payload`
     // in place (see `clampReadPayload`), so `durationMs` here is

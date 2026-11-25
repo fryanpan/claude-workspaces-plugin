@@ -103,7 +103,10 @@ describe('hydrating a dormant binding', () => {
     await waitFor(() => existsSync(ydoc) || undefined, { describe: 'the first .ydoc snapshot' });
     const persistedAt = statSync(ydoc).mtimeMs;
     expect(
-      first.findAndReplace(docId, { find: 'leaves at dawn', replace: 'leaves at first light' }).ok,
+      first.docEdits.findAndReplace(docId, {
+        find: 'leaves at dawn',
+        replace: 'leaves at first light',
+      }).ok,
     ).toBe(true);
     await waitFor(() => statSync(ydoc).mtimeMs > persistedAt || undefined, {
       describe: 'the edit to reach the .ydoc',
@@ -154,7 +157,10 @@ describe('hydrating a dormant binding', () => {
     await waitFor(() => existsSync(ydoc) || undefined, { describe: 'the first .ydoc snapshot' });
     const persistedAt = statSync(ydoc).mtimeMs;
     expect(
-      first.findAndReplace(docId, { find: 'leaves at dawn', replace: 'leaves at first light' }).ok,
+      first.docEdits.findAndReplace(docId, {
+        find: 'leaves at dawn',
+        replace: 'leaves at first light',
+      }).ok,
     ).toBe(true);
     await waitFor(() => statSync(ydoc).mtimeMs > persistedAt || undefined, {
       describe: 'the edit to reach the .ydoc',
@@ -193,7 +199,10 @@ describe('hydrating a dormant binding', () => {
     await waitFor(() => existsSync(ydoc) || undefined, { describe: 'the first .ydoc snapshot' });
     const persistedAt = statSync(ydoc).mtimeMs;
     expect(
-      first.findAndReplace(docId, { find: 'leaves at dawn', replace: 'leaves at first light' }).ok,
+      first.docEdits.findAndReplace(docId, {
+        find: 'leaves at dawn',
+        replace: 'leaves at first light',
+      }).ok,
     ).toBe(true);
     await waitFor(() => statSync(ydoc).mtimeMs > persistedAt || undefined, {
       describe: 'the edit to reach the .ydoc',

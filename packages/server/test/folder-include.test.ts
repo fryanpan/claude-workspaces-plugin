@@ -85,7 +85,7 @@ describe('a folder of gitignored recordings', () => {
       ok: false,
       error: 'not-listed',
     });
-    const raw = await docStore.resolveSetFile(res.setId, MP4_A, { media: true });
+    const raw = await docStore.workspaces.resolveSetFile(res.setId, MP4_A, { media: true });
     expect(raw).toEqual({ ok: false, error: 'not-listed' });
   });
 
@@ -102,7 +102,7 @@ describe('a folder of gitignored recordings', () => {
     // The share rule reads the stored include back, so a later open (the
     // reader's click, a share visitor's request) is admitted too.
     expect((await docStore.openContextFile(res.setId, MP4_B)).ok).toBe(true);
-    const raw = await docStore.resolveSetFile(res.setId, MP4_A, { media: true });
+    const raw = await docStore.workspaces.resolveSetFile(res.setId, MP4_A, { media: true });
     expect(raw.ok).toBe(true);
     const tree = docStore.listRepoFiles(res.setId);
     expect(tree.files?.map((f) => f.relPath)).toContain(MP4_A);

@@ -612,7 +612,7 @@ export async function handleDocThreadRoutes(
       if (voice === false) return j(400, { error: 'voice must be { clip, raw } for this doc' });
       const editing = docStore.getThread(docId, threadId)?.comments.find((c) => c.id === commentId);
       if (!mayTouchFrom(via, editing)) return j(403, { error: 'mock_frame_edit_refused' });
-      const res = docStore.editCommentText(docId, threadId, commentId, text, {
+      const res = docStore.docThreads.editCommentText(docId, threadId, commentId, text, {
         actor: user,
         ...(voice ? { voice } : {}),
         ...(typeof body?.reason === 'string' ? { reason: body.reason } : {}),
@@ -659,7 +659,7 @@ export async function handleDocThreadRoutes(
       ) {
         return j(400, { error: 'lessSpecific must be a non-empty string' });
       }
-      const res = docStore.reviseCommentReview(
+      const res = docStore.docThreads.reviseCommentReview(
         docId,
         threadId,
         commentId,
@@ -739,7 +739,7 @@ export async function handleDocThreadRoutes(
       if (reason !== undefined && typeof reason !== 'string') {
         return j(400, { error: 'reason must be a string' });
       }
-      const res = docStore.withdrawCommentReview(docId, threadId, commentId, {
+      const res = docStore.docThreads.withdrawCommentReview(docId, threadId, commentId, {
         actor: user,
         ...(reason !== undefined ? { reason } : {}),
         ...(threadRest === '/withdraw/undo' ? { undo: true } : {}),
@@ -781,7 +781,7 @@ export async function handleDocThreadRoutes(
         const denied = ownerOnlyDenial(threadId, commentId);
         if (denied) return denied;
       }
-      const res = docStore.undoReviewItemAnswer(docId, threadId, commentId, user, {
+      const res = docStore.docThreads.undoReviewItemAnswer(docId, threadId, commentId, user, {
         generate: !visitor,
       });
       if (!res.ok) {
@@ -825,7 +825,7 @@ export async function handleDocThreadRoutes(
       if (summaryHash(now) !== summary.hash) {
         return j(409, { error: 'thread changed during generation' });
       }
-      const updated = docStore.applyThreadSummary(docId, threadId, summary);
+      const updated = docStore.activity.applyThreadSummary(docId, threadId, summary);
       return updated ? j(200, { thread: updated, summary }) : j(404, { error: 'thread not found' });
     }
     if (threadRest === '/resolve' && req.method === 'POST') {
@@ -834,7 +834,10 @@ export async function handleDocThreadRoutes(
       if (isCategoryAuthor(author)) return refuseCategoryAuthor();
       // Resolve is a thread change, so it schedules a summary — and a
       // visitor must not be able to spend the API key by clicking it.
-      const t = docStore.resolve(docId, threadId, author, { generate: !visitor, ...viaOpt });
+      const t = docStore.docThreads.resolve(docId, threadId, author, {
+        generate: !visitor,
+        ...viaOpt,
+      });
       return t ? j(200, { thread: t }) : j(404, { error: 'thread not found' });
     }
     if (threadRest === '/progress' && req.method === 'POST') {
@@ -849,7 +852,7 @@ export async function handleDocThreadRoutes(
       const author = authorFor(body?.author);
       if (!author) return j(400, { error: 'author required' });
       if (isCategoryAuthor(author)) return refuseCategoryAuthor();
-      const t = docStore.setProgress(docId, threadId, state, author);
+      const t = docStore.docThreads.setProgress(docId, threadId, state, author);
       if (t === 'not-found') return j(404, { error: 'thread not found' });
       if (t === 'resolved') return j(409, { error: 'thread is resolved; reopen it first' });
       return j(200, { thread: t });
@@ -858,7 +861,10 @@ export async function handleDocThreadRoutes(
       const body = sent<ThreadAuthorBody>(await safeJson(req));
       const author = authorFor(body?.author);
       if (isCategoryAuthor(author)) return refuseCategoryAuthor();
-      const t = docStore.reopen(docId, threadId, author, { generate: !visitor, ...viaOpt });
+      const t = docStore.docThreads.reopen(docId, threadId, author, {
+        generate: !visitor,
+        ...viaOpt,
+      });
       return t ? j(200, { thread: t }) : j(404, { error: 'thread not found' });
     }
     if (threadRest === '/reanchor' && req.method === 'POST') {
@@ -883,11 +889,11 @@ export async function handleDocThreadRoutes(
           if (refused) return refused;
         }
         if (anchor.kind !== 'element') return j(400, { error: 'refresh takes an element anchor' });
-        const r = docStore.refreshAnchor(docId, threadId, anchor);
+        const r = docStore.docThreads.refreshAnchor(docId, threadId, anchor);
         if (!r.ok) return j(r.reason === 'not-found' ? 404 : 409, { error: r.reason });
         return j(200, { thread: r.thread, changed: r.changed });
       }
-      const t = docStore.reanchor(docId, threadId, anchor);
+      const t = docStore.docThreads.reanchor(docId, threadId, anchor);
       return t ? j(200, { thread: t }) : j(404, { error: 'thread not found' });
     }
     if (threadRest === '/rewrite_region' && req.method === 'POST') {
@@ -897,7 +903,7 @@ export async function handleDocThreadRoutes(
       if (body?.suggest === true) {
         const author = parseSuggestionAuthor(visitor ? { author: authorFor(body?.author) } : body);
         if (!author) return j(400, { error: 'author required when suggest is true' });
-        const res = docStore.createSuggestionForThread(docId, threadId, {
+        const res = docStore.docSuggests.createSuggestionForThread(docId, threadId, {
           replacement,
           // The direct branch above reads an omitted field as false; a
           // proposal reads it as "core decides", which is parsed.
@@ -907,8 +913,8 @@ export async function handleDocThreadRoutes(
         });
         return res.ok ? j(200, res) : j(409, res);
       }
-      const res = docStore.guardScopedEdit(docId, scopedEditGuard(body, authorFor), () =>
-        docStore.rewriteThreadRegion(docId, threadId, replacement, { parseInlineMarks }),
+      const res = docStore.docEdits.guardScopedEdit(docId, scopedEditGuard(body, authorFor), () =>
+        docStore.docEdits.rewriteThreadRegion(docId, threadId, replacement, { parseInlineMarks }),
       );
       return res.ok ? j(200, withSyncError(docStore, docId, res)) : j(409, res);
     }
@@ -923,8 +929,8 @@ export async function handleDocThreadRoutes(
             'text required — a non-empty string. A new block goes to insert_blocks_after (its field is markdown).',
         });
       }
-      const res = docStore.guardScopedEdit(docId, scopedEditGuard(body, authorFor), () =>
-        docStore.insertAfterThread(docId, threadId, text),
+      const res = docStore.docEdits.guardScopedEdit(docId, scopedEditGuard(body, authorFor), () =>
+        docStore.docEdits.insertAfterThread(docId, threadId, text),
       );
       return res.ok ? j(200, withSyncError(docStore, docId, res)) : j(409, res);
     }
@@ -935,8 +941,8 @@ export async function handleDocThreadRoutes(
       if (placement === PLACEMENT_INVALID) {
         return j(400, { error: "placement must be 'after-block' or 'top-level'" });
       }
-      const res = docStore.guardScopedEdit(docId, scopedEditGuard(body, authorFor), () =>
-        docStore.insertBlocksAfterThread(docId, threadId, markdown, { placement }),
+      const res = docStore.docEdits.guardScopedEdit(docId, scopedEditGuard(body, authorFor), () =>
+        docStore.docEdits.insertBlocksAfterThread(docId, threadId, markdown, { placement }),
       );
       return res.ok ? j(200, withSyncError(docStore, docId, res)) : j(409, res);
     }

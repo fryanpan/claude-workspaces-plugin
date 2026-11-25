@@ -50,7 +50,7 @@ function backfilledStream(dataDir: string): string {
   return existsSync(p) ? readFileSync(p, 'utf8') : '';
 }
 
-describe('DocStore.archiveDoc / unarchiveDoc', () => {
+describe('DocStore.workspaces.archiveDoc / unarchiveDoc', () => {
   let dataDir: string;
   let folder: string;
   let mdPath: string;
@@ -73,7 +73,7 @@ describe('DocStore.archiveDoc / unarchiveDoc', () => {
   });
 
   it('returns not-found for an id no doc is bound under', () => {
-    const res = docStore.archiveDoc('nope', { archivedBy: 'Tester' });
+    const res = docStore.workspaces.archiveDoc('nope', { archivedBy: 'Tester' });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toBe('not-found');
   });
@@ -87,7 +87,10 @@ describe('DocStore.archiveDoc / unarchiveDoc', () => {
     );
     await settle();
 
-    const res = docStore.archiveDoc('solo', { archivedBy: 'Tester', reason: 'draft published' });
+    const res = docStore.workspaces.archiveDoc('solo', {
+      archivedBy: 'Tester',
+      reason: 'draft published',
+    });
     expect(res.ok).toBe(true);
     expect(docStore.list().length).toBe(0);
     expect(docStore.get('solo')).toBeUndefined();
@@ -100,7 +103,7 @@ describe('DocStore.archiveDoc / unarchiveDoc', () => {
   it('moves the private-meta sidecar alongside the ydoc', async () => {
     await settle();
     expect(existsSync(join(dataDir, 'solo.private.json'))).toBe(true);
-    expect(docStore.archiveDoc('solo', { archivedBy: 'Tester' }).ok).toBe(true);
+    expect(docStore.workspaces.archiveDoc('solo', { archivedBy: 'Tester' }).ok).toBe(true);
     expect(existsSync(join(dataDir, 'solo.private.json'))).toBe(false);
     expect(existsSync(join(dataDir, '_archive', 'solo.private.json'))).toBe(true);
   });
@@ -114,14 +117,14 @@ describe('DocStore.archiveDoc / unarchiveDoc', () => {
     );
     // No settle: the debounced write has NOT fired, so only a flush inside
     // archiveDoc can get this comment onto disk.
-    expect(docStore.archiveDoc('solo', { archivedBy: 'Tester' }).ok).toBe(true);
-    expect(docStore.unarchiveDoc('solo', { archivedBy: 'Tester' }).ok).toBe(true);
+    expect(docStore.workspaces.archiveDoc('solo', { archivedBy: 'Tester' }).ok).toBe(true);
+    expect(docStore.workspaces.unarchiveDoc('solo', { archivedBy: 'Tester' }).ok).toBe(true);
     const threads = docStore.listThreads('solo', { status: 'open' });
     expect(threads[0]?.comments[0]?.text).toBe('typed a heartbeat before retiring it');
   });
 
   it('records who archived it and why, and lists it as archived', () => {
-    docStore.archiveDoc('solo', { archivedBy: 'Tester', reason: 'draft published' });
+    docStore.workspaces.archiveDoc('solo', { archivedBy: 'Tester', reason: 'draft published' });
 
     const manifest = readDocArchiveManifest(dataDir, 'solo');
     expect(manifest).toBeTruthy();
@@ -139,16 +142,16 @@ describe('DocStore.archiveDoc / unarchiveDoc', () => {
   });
 
   it('remembers the boards it was on so unarchive can put it back', () => {
-    docStore.archiveDoc('solo', { archivedBy: 'Tester', linkedWorkspaces: ['w-abc'] });
+    docStore.workspaces.archiveDoc('solo', { archivedBy: 'Tester', linkedWorkspaces: ['w-abc'] });
     expect(readDocArchiveManifest(dataDir, 'solo')?.linkedWorkspaces).toEqual(['w-abc']);
-    const back = docStore.unarchiveDoc('solo', { archivedBy: 'Tester' });
+    const back = docStore.workspaces.unarchiveDoc('solo', { archivedBy: 'Tester' });
     expect(back.ok).toBe(true);
     if (!back.ok) return;
     expect(back.manifest.linkedWorkspaces).toEqual(['w-abc']);
   });
 
   it('appends an archive event to the activity log', () => {
-    docStore.archiveDoc('solo', { archivedBy: 'Tester', reason: 'draft published' });
+    docStore.workspaces.archiveDoc('solo', { archivedBy: 'Tester', reason: 'draft published' });
     const rows = readFileSync(join(dataDir, 'activity.jsonl'), 'utf8')
       .split('\n')
       .filter(Boolean)
@@ -179,9 +182,9 @@ describe('DocStore.archiveDoc / unarchiveDoc', () => {
       'still unresolved',
     );
     await settle();
-    expect(docStore.archiveDoc('solo', { archivedBy: 'Tester' }).ok).toBe(true);
+    expect(docStore.workspaces.archiveDoc('solo', { archivedBy: 'Tester' }).ok).toBe(true);
 
-    const back = docStore.unarchiveDoc('solo', { archivedBy: 'Tester' });
+    const back = docStore.workspaces.unarchiveDoc('solo', { archivedBy: 'Tester' });
     expect(back.ok).toBe(true);
     if (!back.ok) return;
     expect(back.docId).toBe('solo');
@@ -196,7 +199,7 @@ describe('DocStore.archiveDoc / unarchiveDoc', () => {
     expect(listArchivedDocs(dataDir)).toEqual([]);
     // The binding is re-armed, so an edit still reaches the file. A doc that
     // came back read-only would look fine and silently stop writing back.
-    const edited = docStore.findAndReplace('solo', {
+    const edited = docStore.docEdits.findAndReplace('solo', {
       find: 'the unique md line',
       replace: 'the edited md line',
     });
@@ -205,8 +208,8 @@ describe('DocStore.archiveDoc / unarchiveDoc', () => {
   });
 
   it('records an unarchive event naming who restored it', () => {
-    docStore.archiveDoc('solo', { archivedBy: 'Tester' });
-    docStore.unarchiveDoc('solo', { archivedBy: 'Restorer' });
+    docStore.workspaces.archiveDoc('solo', { archivedBy: 'Tester' });
+    docStore.workspaces.unarchiveDoc('solo', { archivedBy: 'Restorer' });
     const rows = readFileSync(join(dataDir, 'activity.jsonl'), 'utf8')
       .split('\n')
       .filter(Boolean)
@@ -218,7 +221,7 @@ describe('DocStore.archiveDoc / unarchiveDoc', () => {
   });
 
   it('unarchive of an id that was never archived is not-found', () => {
-    const res = docStore.unarchiveDoc('nope', { archivedBy: 'Tester' });
+    const res = docStore.workspaces.unarchiveDoc('nope', { archivedBy: 'Tester' });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toBe('not-found');
   });
@@ -230,7 +233,7 @@ describe('DocStore.archiveDoc / unarchiveDoc', () => {
       setId: 'repo-abc1234-live',
       relPath: 'notes.md',
     });
-    const res = docStore.archiveDoc('member', { archivedBy: 'Tester' });
+    const res = docStore.workspaces.archiveDoc('member', { archivedBy: 'Tester' });
     expect(res.ok).toBe(false);
     if (res.ok) return;
     expect(res.error).toBe('review-member');
@@ -246,7 +249,7 @@ describe('DocStore.archiveDoc / unarchiveDoc', () => {
       // all now — the projection is the only thing that mints them, and this
       // test is about what `archiveDoc` does once one exists.
       docStore.getOrCreate(docId, { type: 'markdown' }, { authority: 'server' });
-      const res = docStore.archiveDoc(docId, { archivedBy: 'Tester' });
+      const res = docStore.workspaces.archiveDoc(docId, { archivedBy: 'Tester' });
       expect(res.ok).toBe(false);
       if (!res.ok) expect(res.error).toBe('board-owned');
       expect(docStore.get(docId)).toBeDefined();
@@ -265,7 +268,7 @@ describe('DocStore.archiveDoc / unarchiveDoc', () => {
     writeFileSync(join(dataDir, '_archive', 'solo.ydoc'), 'older-snapshot');
     await settle();
 
-    const res = docStore.archiveDoc('solo', { archivedBy: 'Tester' });
+    const res = docStore.workspaces.archiveDoc('solo', { archivedBy: 'Tester' });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toBe('archive-collision');
     // Nothing moved, and the older snapshot is intact.
@@ -275,11 +278,11 @@ describe('DocStore.archiveDoc / unarchiveDoc', () => {
   });
 
   it('refuses to unarchive onto a live doc of the same id', () => {
-    docStore.archiveDoc('solo', { archivedBy: 'Tester' });
+    docStore.workspaces.archiveDoc('solo', { archivedBy: 'Tester' });
     // Something re-minted the id while the doc was away.
     writeFileSync(join(dataDir, 'solo.ydoc'), 'live-again');
 
-    const res = docStore.unarchiveDoc('solo', { archivedBy: 'Tester' });
+    const res = docStore.workspaces.unarchiveDoc('solo', { archivedBy: 'Tester' });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.error).toBe('restore-collision');
     // Nothing moved: the archived copy and the newer doc are both whole.
@@ -326,14 +329,14 @@ describe('an archived doc keeps feeding activity-backfill', () => {
     // move into _archive threatens: readPrivateMeta looks NEXT TO the .ydoc.
     expect(before).toContain('"sourceUrl"');
 
-    expect(docStore.archiveDoc('solo', { archivedBy: 'Tester' }).ok).toBe(true);
+    expect(docStore.workspaces.archiveDoc('solo', { archivedBy: 'Tester' }).ok).toBe(true);
 
     const after = backfilledStream(dataDir);
     expect(after).toBe(before);
   });
 
   it('the doc manifest is invisible to the backfill', () => {
-    docStore.archiveDoc('solo', { archivedBy: 'Tester' });
+    docStore.workspaces.archiveDoc('solo', { archivedBy: 'Tester' });
     // `.doc.json` does not end in `.ydoc`, so the enumerator skips it rather
     // than trying to parse it as a document and logging a failure per run.
     expect(() => backfilledStream(dataDir)).not.toThrow();

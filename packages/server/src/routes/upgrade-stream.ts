@@ -484,7 +484,7 @@ export function createUpgradeStream(ctx: UpgradeStreamContext): UpgradeStream {
             // connections that grant opened. Without these two the sweeps
             // closed the editor and left an open microphone running a
             // billed transcription session against a doc the person may no
-            // longer read. `DocStore.trackShareSocket` is the other half: this
+            // longer read. `DocStore.fanout.trackShareSocket` is the other half: this
             // socket is in no doc's `conns` for a sweep to walk.
             ...(visitorShareId ? { shareId: visitorShareId } : {}),
             ...(visitorMemberKey ? { shareMember: visitorMemberKey } : {}),

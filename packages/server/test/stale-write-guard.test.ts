@@ -312,7 +312,7 @@ describe('DocStore.staleWriteCheck (10-minute fallback window)', () => {
       webhooks: createWebhookDispatcher({ onLog: () => {} }),
     });
     docStore.getOrCreate('d1', { type: 'markdown' });
-    docStore.setDocContent('d1', '# Doc\n\nBody.\n');
+    docStore.docEdits.setDocContent('d1', '# Doc\n\nBody.\n');
   });
 
   afterEach(() => {
