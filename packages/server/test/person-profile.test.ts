@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { agentTokenKey, mintAgentToken } from '../src/auth/agent-token.ts';
 import { Identities, type IdentityRecord } from '../src/identities.ts';
 import { PersonAgentLinks } from '../src/person-agent-link.ts';
-import { handleProfile } from '../src/routes/person-profile.ts';
+import { type PersonProfileContext, handleProfile } from '../src/routes/person-profile.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { loadCookieKey } from '../src/share/link-session.ts';
 import { type RoomPage, joinRoom } from './room-page.ts';
@@ -47,15 +47,32 @@ describe('handleProfile, given the identity a proof named', () => {
     identities = new Identities({ dataDir });
     alice = identities.upsertByEmail('alice@example.com');
     bob = identities.upsertByEmail('bob@example.com');
+    identities.upsertAgent('agent-a1', 'Harborlight');
   });
   afterAll(() => rmSync(dataDir, { recursive: true, force: true }));
 
-  const call = (body: unknown, proven: IdentityRecord | null, headers: HeadersInit = {}) =>
+  // One board, Harborlight, with agent-a1 attached and Alice its only member.
+  const taskStore = {
+    listWorkspaces: () => [{ id: 'w-one' }],
+    listAttachments: (id: string) => (id === 'w-one' ? [{ agentId: 'agent-a1' }] : []),
+  } as unknown as PersonProfileContext['taskStore'];
+  const shareLinks = {
+    isMember: (id: string, email?: string | null) =>
+      id === 'w-one' && email === 'alice@example.com',
+  };
+  const call = (
+    body: unknown,
+    proven: IdentityRecord | null,
+    headers: HeadersInit = {},
+    shareMember = false,
+  ) =>
     handleProfile(
       {
         identities,
         personAgentLinks: new PersonAgentLinks(dataDir, identities),
         onPersonRenamed: (id, name) => void renamed.push([id, name]),
+        taskStore,
+        shareLinks,
         j,
         safeJson,
       },
@@ -65,7 +82,22 @@ describe('handleProfile, given the identity a proof named', () => {
         body: JSON.stringify(body),
       }),
       () => proven,
+      shareMember,
     );
+
+  it('lets a share member name an agent on their own board, and nothing else', async () => {
+    expect((await call({ leadAgentId: 'agent-a1' }, alice, {}, true)).status).toBe(200);
+    for (const body of [
+      { leadAgentId: 'agent-elsewhere' },
+      { leadAgentId: 'agent-a1', displayName: 'Saltmarsh' },
+      { displayName: 'Saltmarsh' },
+    ]) {
+      expect((await call(body, alice, {}, true)).status).toBe(403);
+    }
+    expect(identities.get(alice.id)?.displayName).not.toBe('Saltmarsh');
+    // Bob is no member of Harborlight, so its agent is not his to name.
+    expect((await call({ leadAgentId: 'agent-a1' }, bob, {}, true)).status).toBe(403);
+  });
 
   it('renames the person an Access assertion proved, whatever id the body names', async () => {
     const res = await call({ displayName: 'Riverbend', id: bob.id, personId: bob.id }, alice);

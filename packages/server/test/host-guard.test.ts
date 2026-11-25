@@ -959,7 +959,10 @@ describe('shareScopeAllows (workspace-board surfaces — §3.12 commit 8)', () =
     expect(shareScopeAllows('/api/auth/session', 'POST', BOARD, workspaceOf)).toBe(false);
     expect(shareScopeAllows('/api/auth/start', 'POST', BOARD, workspaceOf)).toBe(false);
     expect(shareScopeAllows('/api/auth/verify', 'POST', BOARD, workspaceOf)).toBe(false);
-    expect(shareScopeAllows('/api/auth/profile', 'POST', BOARD, workspaceOf)).toBe(false);
+    // The profile is admitted for one field, naming the member's own lead
+    // agent; `routes/person-profile.ts` refuses every other field.
+    expect(shareScopeAllows('/api/auth/profile', 'POST', BOARD, workspaceOf)).toBe(true);
+    expect(shareScopeAllows('/api/auth/profile', 'GET', BOARD, workspaceOf)).toBe(false);
   });
 
   it('admits the board-participation routes on the shared workspace', () => {

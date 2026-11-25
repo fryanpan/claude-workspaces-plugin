@@ -256,6 +256,8 @@ export interface AuthShareRouteRequest {
   provenIdentityFor: () => IdentityRecord | null;
   /** The identity Cloudflare Access proved, never a session cookie's. */
   accessIdentityFor: () => IdentityRecord | null;
+  /** Set when a share visitor sent this: the profile route narrows to them. */
+  visitor?: unknown;
 }
 
 /**
@@ -604,7 +606,7 @@ export async function handleAuthShareRoutes(
   }
 
   if (pathname === '/api/auth/profile' && req.method === 'POST') {
-    return handleProfile(ctx, req, provenIdentityFor);
+    return handleProfile(ctx, req, provenIdentityFor, rq.visitor != null);
   }
 
   // --- REST: shares ---

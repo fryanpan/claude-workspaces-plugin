@@ -143,7 +143,12 @@ export const ROUTE_TABLE: readonly RouteEntry[] = [
     ['share-scope', '/api/auth/session', 'GET'],
     ['trusted-local', '/api/auth/logout', 'POST'],
     ['trusted-local', '/api/auth/reauth', 'GET'],
-    ['trusted-local', '/api/auth/profile', 'POST'],
+    [
+      'share-scope',
+      '/api/auth/profile',
+      'POST',
+      'A share member may only name their own lead agent, one attached to a board their membership admits; any other field is refused whole (`routes/person-profile.ts`).',
+    ],
     ['trusted-local', '/api/share', 'GET'],
     ['trusted-local', '/api/share/enabled', 'POST'],
     ['trusted-local', '/api/share/doc', 'POST'],

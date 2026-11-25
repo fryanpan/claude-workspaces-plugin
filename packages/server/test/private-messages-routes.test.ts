@@ -10,13 +10,14 @@ import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import { mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { emailIdentityId } from '@claude-workspaces/core';
 import { commentQueuePath } from '../src/agent-comment-queue.ts';
 import { agentTokenKey, mintAgentToken } from '../src/auth/agent-token.ts';
 import { mintBoardWidgetToken, widgetTokenKey } from '../src/auth/widget-token.ts';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { loadCookieKey } from '../src/share/link-session.ts';
 import { type Frame, listenFrames } from './doc-activity-stall-harness.ts';
-import { startShareProofServer } from './share-proof-harness.ts';
+import { post, readJson, startShareProofServer } from './share-proof-harness.ts';
 import { type SignedInPerson, signedInPerson } from './signed-in-person.ts';
 import { waitFor } from './wait-for.ts';
 import { seedBoard } from './workspace-seed.ts';
@@ -241,6 +242,10 @@ describe('a share member and private messages', () => {
   const ALICE = 'alice@harborlight.example';
   const BOB = 'bob@riverbend.example';
   const SALTMARSH = 'saltmarsh@harborlight.example';
+  const RIVERBEND = 'riverbend@harborlight.example';
+  const R1 = 'agent-riverbend-r1';
+  const ELSEWHERE = 'agent-saltmarsh-elsewhere';
+  let bobId = '';
   let s: Awaited<ReturnType<typeof startShareProofServer>>;
   let base = '';
   const at1 = (agentId: string) => mintAgentToken(agentId, agentTokenKey(loadCookieKey(s.dataDir)));
@@ -279,11 +284,14 @@ describe('a share member and private messages', () => {
   beforeAll(async () => {
     s = await startShareProofServer('Harborlight private');
     base = `http://127.0.0.1:${s.handle.port}`;
-    s.handle.shareLinks.addToAudience(s.board, [ALICE, BOB, SALTMARSH], 'Saltmarsh');
-    for (const email of [ALICE, BOB, SALTMARSH]) expect(await s.join(email)).toBe(302);
+    s.handle.shareLinks.addToAudience(s.board, [ALICE, BOB, SALTMARSH, RIVERBEND], 'Saltmarsh');
+    for (const email of [ALICE, BOB, SALTMARSH, RIVERBEND]) {
+      expect(await s.join(email)).toBe(302);
+    }
     for (const [agentId, name] of [
       [A1, 'Harborlight'],
       [B1, 'Riverbend'],
+      [R1, 'Riverbend One'],
     ] as const) {
       s.handle.tasks.attachAgent(s.board, {
         agentId,
@@ -293,7 +301,16 @@ describe('a share member and private messages', () => {
       s.handle.identities.upsertAgent(agentId, name);
     }
     const aliceId = await link(ALICE, A1);
-    const bobId = await link(BOB, B1);
+    bobId = await link(BOB, B1);
+    // An agent on a board none of these members is on.
+    const other = await readJson<{ workspace: { id: string } }>(
+      await s.local('/workspaces', post({ name: 'Saltmarsh elsewhere' })),
+    );
+    s.handle.tasks.attachAgent(other.workspace.id, {
+      agentId: ELSEWHERE,
+      agentName: 'Elsewhere',
+      runtime: 'claude-code-local',
+    });
     expect((await reply(A1, aliceId, 'Alice, the tide is at six')).status).toBe(200);
     expect((await reply(B1, bobId, 'Bob, the ferry is late')).status).toBe(200);
   });
@@ -308,6 +325,14 @@ describe('a share member and private messages', () => {
     expect(alice.messages.map((m) => m.text)).toEqual(['Alice, the tide is at six']);
     const bob = await pageOf(await s.visitor(BOB, '/api/me/messages'));
     expect(bob.messages.map((m) => m.text)).toEqual(['Bob, the ferry is late']);
+  });
+
+  it("never reads another member's conversation, whatever the query names", async () => {
+    for (const query of ['', `?personId=${bobId}`, `?agentId=${B1}`, `?with=${bobId}`]) {
+      const alice = await pageOf(await s.visitor(ALICE, `/api/me/messages${query}`));
+      expect(alice.agentId).toBe(A1);
+      expect(alice.messages.some((m) => m.text === 'Bob, the ferry is late')).toBe(false);
+    }
   });
 
   it('sends to her own agent from the share host, and the reply names her', async () => {
@@ -330,5 +355,50 @@ describe('a share member and private messages', () => {
     const unlinked = await s.visitor(SALTMARSH, '/api/me/messages');
     expect(unlinked.status).toBe(409);
     expect(await unlinked.json()).toMatchObject({ error: 'no_lead_agent' });
+  });
+
+  const profile = (email: string, body: unknown) =>
+    s.visitor(email, '/api/auth/profile', post(body));
+  const sidesOf = async (email: string) => {
+    const who = signedInPerson(s.handle, s.dataDir, base, { email });
+    const res = await fetch(`${base}/api/auth/profile`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...who.headers },
+      body: JSON.stringify({ displayName: s.handle.identities.get(who.user.id)?.displayName }),
+    });
+    return ((await res.json()) as { leadAgent: { named: string | null } }).leadAgent;
+  };
+
+  it('names a lead agent on their own board from the share host, then messages it', async () => {
+    const named = await profile(RIVERBEND, { leadAgentId: R1 });
+    expect(named.status).toBe(200);
+    const riverbendId = emailIdentityId(RIVERBEND);
+    const confirmed = await fetch(`${base}/api/agents/${R1}/person`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${at1(R1)}` },
+      body: JSON.stringify({ personId: riverbendId }),
+    });
+    expect(await confirmed.json()).toMatchObject({ state: 'linked' });
+    const sent = await s.visitor(RIVERBEND, '/api/me/messages', post({ text: 'Hello, R1' }));
+    expect(sent.status).toBe(200);
+    expect(await sent.json()).toMatchObject({ agentId: R1 });
+  });
+
+  it('refuses, and changes nothing, an agent on another board, a write naming somebody else, or a name change', async () => {
+    const before = s.handle.identities.get(emailIdentityId(ALICE))?.displayName;
+    for (const body of [
+      { leadAgentId: ELSEWHERE },
+      { leadAgentId: B1, personId: bobId },
+      { leadAgentId: A1, displayName: 'Bob' },
+      { displayName: 'Bob' },
+    ]) {
+      const res = await profile(ALICE, body);
+      expect(res.status, JSON.stringify(body)).toBe(403);
+    }
+    expect(s.handle.identities.get(emailIdentityId(ALICE))?.displayName).toBe(before);
+    expect((await sidesOf(ALICE)).named).toBe(A1);
+    expect((await sidesOf(BOB)).named).toBe(B1);
+    const alice = await pageOf(await s.visitor(ALICE, '/api/me/messages'));
+    expect(alice.agentId).toBe(A1);
   });
 });
