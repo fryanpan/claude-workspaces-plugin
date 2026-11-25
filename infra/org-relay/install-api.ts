@@ -42,7 +42,7 @@ export function machineCurl(method: 'GET' | 'POST', path: string, body?: unknown
       ? ''
       : `printf %s ${Buffer.from(JSON.stringify(body)).toString('base64')} | base64 -d | `;
   return [
-    `${data}curl -s -w '\\n%{http_code}' -X ${method}`,
+    `${data}curl -s --max-time 15 -w '\\n%{http_code}' -X ${method}`,
     `-H 'host: localhost:8787' -H 'content-type: application/json'`,
     ...(body === undefined ? [] : ['--data-binary @-']),
     `'http://127.0.0.1:8787${path}'`,

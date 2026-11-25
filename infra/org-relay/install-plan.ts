@@ -246,7 +246,7 @@ export function relayConfigText(
 export function redacted(configText: string): string {
   return configText
     .replace(/"(at2\.[A-Za-z0-9_-]+)\.[^"]*"/g, '"$1.<redacted>"')
-    .replace(/("clientSecret": )"[^"]*"/g, '$1"<redacted>"');
+    .replace(/("client(?:Id|Secret)": )"[^"]*"/g, '$1"<redacted>"');
 }
 
 const xml = (s: string) =>

@@ -737,8 +737,8 @@ The script does these steps in order:
    `fly ssh console`, the same way as the push-key step below. If the
    installed config already holds a token whose record is live, the script
    keeps it. **`--remint` mints a new token, which replaces the old one.**
-   The script revokes the old record only after the relay has restarted on
-   the new config.
+   The script revokes the old record, and any other live relay record on
+   that board, only after the check in step 5 passes.
 2. **It writes the config.** The file is
    `~/Library/Application Support/claude-workspaces/relay/relay-config.json`,
    at mode 600, in the shape `relay-config.ts` reads. The script checks the
@@ -762,7 +762,9 @@ The script does these steps in order:
    whose values have not changed.
 5. **It checks the result.** The relay must log `running: N seats` after this
    start, and every seat's server must answer the relay's own read of the
-   seat's outbox. If either check fails, the script exits 1.
+   seat's outbox. A machine whose secrets were just set is restarting, so
+   the script asks each server for up to three minutes. If either check
+   fails, the script exits 1 and revokes nothing.
 
 Run the script again whenever `seats.json` changes. A second run with nothing
 changed mints nothing, files nothing and sets no secret. It does restart the

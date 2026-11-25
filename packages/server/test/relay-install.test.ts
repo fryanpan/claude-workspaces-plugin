@@ -14,7 +14,18 @@
  * no token value appears in any argument, any line printed, or fly's stdin.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
-import { appendFileSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import {
+  appendFileSync,
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TfOutputs } from '../../../infra/cloudflare/outputs.ts';
@@ -264,6 +275,37 @@ describe('relay:install', () => {
     expect(h.events).toEqual(['kickstart']);
     expect(h.out.join('\n')).toContain('already set');
     expect(h.out.join('\n')).toContain("keeps the relay's token on riverbend");
+  });
+
+  it('a dry run over an install prints no token value', async () => {
+    const h = harness(home);
+    expect(await runInstall({ dryRun: true, remint: false, boards: new Map() }, h.io)).toBe(0);
+    expect(h.out.join('\n')).toContain('<redacted>');
+    expect(leaks(h, first.tokens)).toEqual([]);
+  });
+
+  it('keeps a token the relay renewed, though the config value has expired', async () => {
+    const h = harness(home);
+    const live = first.tokens.find((t) => t.split('.')[3] === macBoard) as string;
+    const f = live.split('.');
+    // The value the config was written with, long expired; the relay renewed
+    // it into bearers.json, which names the value it was renewed from.
+    const expired = [f[0], f[1], f[2], f[3], '1', f[5]].join('.');
+    const text = readFileSync(h.paths.config, 'utf8').replace(live, expired);
+    writeFileSync(h.paths.config, text, { mode: 0o600 });
+    chmodSync(h.paths.config, 0o600);
+    mkdirSync(h.paths.stateDir, { recursive: true });
+    const from = createHash('sha256').update(expired).digest('hex');
+    writeFileSync(
+      join(h.paths.stateDir, 'bearers.json'),
+      JSON.stringify({ mac: { [macBoard]: { value: live, from } } }),
+      { mode: 0o600 },
+    );
+    const before = (await records(mac)).length;
+    expect(await runInstall({ dryRun: false, remint: false, boards: new Map() }, h.io)).toBe(0);
+    expect((await records(mac)).length).toBe(before);
+    expect(readFileSync(h.paths.config, 'utf8')).toContain(expired);
+    expect(h.out.join('\n')).toContain('team-lead: mac answered');
   });
 
   it('--remint replaces both tokens and revokes the old records after the restart', async () => {

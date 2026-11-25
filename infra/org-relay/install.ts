@@ -14,7 +14,7 @@
  *     relay's `at2` on that board (`routes/board-tokens.ts`): on the Mac at its
  *     loopback, on a project machine at the machine's loopback over
  *     `fly ssh console`. A token whose record is still live is kept; minting
- *     replaces it, and the old record is revoked once the relay has the new one.
+ *     replaces it, and the old record is revoked once the check below passes.
  *  2. Writes the relay config (`relay-config.ts`) at mode 600. An Access
  *     service token is read from the Keychain (`tokenServices`).
  *  3. Writes the relay's LaunchAgent and (re)starts it.
@@ -94,6 +94,8 @@ export interface InstallIo extends ApiIo {
   out: (line: string) => void;
   /** How long to wait for the relay's "running" line. */
   startWaitMs?: number;
+  /** How long to keep asking each server for its outbox. */
+  answerWaitMs?: number;
 }
 
 export interface RelayPaths {
@@ -124,6 +126,8 @@ export function relayPaths(home: string): RelayPaths {
 
 /** A token the dry run has not minted: valid to the config parser, never sent. */
 const UNMINTED = 'at2.unminted.relay.board.0.x';
+const UNREAD_ID = 'unread.access';
+const UNREAD_SECRET = 'unreadunreadunread';
 const UNFILED = (kind: string) => `task:unfiled-${kind}`;
 
 const sha = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -221,25 +225,38 @@ export async function runInstall(opts: InstallOptions, io: InstallIo): Promise<n
         record.agentId === list.relayAgentId &&
         record.boardId === board;
       const kept = existing.raw(server.id, board);
-      if (live && !opts.remint && kept) {
-        say(`keeps the relay's token on ${server.id} board ${board} (record ${record.id})`);
+      const keep = live && !opts.remint && kept !== undefined;
+      // Every other live relay record on this board is one an earlier run
+      // left behind: a remint, a run that died after its mint, a seat that
+      // moved. Each is revoked once the relay is answering on the new config.
+      const where = `${server.id} board ${board}`;
+      for (const r of records) {
+        const relayOnBoard = r.agentId === list.relayAgentId && r.boardId === board;
+        if (relayOnBoard && r.revokedAt === undefined && !(keep && r.id === record?.id)) {
+          revokes.push({ call, id: r.id, where });
+        }
+      }
+      if (keep) {
+        say(`keeps the relay's token on ${where} (record ${record?.id})`);
         bearers.set(board, kept);
         continue;
       }
       say(
-        `${would}mint the relay's token on ${server.id} board ${board} for ${list.relayAgentId}` +
-          (live ? `; it replaces record ${record.id}, revoked once the relay has the new one` : ''),
+        `${would}mint the relay's token on ${where} for ${list.relayAgentId}` +
+          (live ? `; it replaces record ${record?.id}, revoked once the relay answers` : ''),
       );
       bearers.set(board, opts.dryRun ? UNMINTED : await mintToken(call, list.relayAgentId, board));
-      if (live) revokes.push({ call, id: record.id, where: `${server.id} board ${board}` });
     }
     const sec: ServerSecrets = { bearers };
     if (server.accessToken) {
       const svc = tokenServices(server.accessToken);
-      sec.serviceToken = {
-        clientId: io.keychain(svc.clientId),
-        clientSecret: io.keychain(svc.secret),
-      };
+      // The dry run names the Keychain entries and reads neither.
+      sec.serviceToken = opts.dryRun
+        ? { clientId: UNREAD_ID, clientSecret: UNREAD_SECRET }
+        : { clientId: io.keychain(svc.clientId), clientSecret: io.keychain(svc.secret) };
+      say(
+        `${would}read ${server.id}'s service token from the Keychain (${svc.clientId}, ${svc.secret})`,
+      );
     }
     secrets.set(server.id, sec);
   }
@@ -253,9 +270,12 @@ export async function runInstall(opts: InstallOptions, io: InstallIo): Promise<n
     stateDir: paths.stateDir,
     logPath: paths.log,
   });
-  const installed = JSON.parse(readOr(paths.installed, '{}')) as {
-    secrets?: Record<string, string>;
-  };
+  let installed: { secrets?: Record<string, string> } = {};
+  try {
+    installed = JSON.parse(readOr(paths.installed, '{}'));
+  } catch {
+    say(`${paths.installed} is unreadable; every lead's settings are set again`);
+  }
   const secretPlan = servers
     .filter((s) => s.app)
     .map((s) => {
@@ -311,11 +331,6 @@ export async function runInstall(opts: InstallOptions, io: InstallIo): Promise<n
     if (r.status !== 0) throw new Error(`launchctl kickstart failed: ${r.stderr.trim()}`);
     say(`restarted ${RELAY_LABEL}`);
   }
-  for (const r of revokes) {
-    await revokeToken(r.call, r.id);
-    say(`revoked record ${r.id} on ${r.where}`);
-  }
-
   // 4. The lead's two settings on each project app.
   const done: Record<string, string> = { ...installed.secrets };
   for (const p of secretPlan) {
@@ -345,14 +360,32 @@ export async function runInstall(opts: InstallOptions, io: InstallIo): Promise<n
   const config = loadRelayConfig(paths.config);
   if ('error' in config) throw new Error(`the written config is refused: ${config.error}`);
   applySavedBearers(config, paths.stateDir);
+  // A machine whose secrets were just set is restarting: ask until it answers.
+  const answerBy = io.now() + (io.answerWaitMs ?? 180_000);
   let answered = 0;
   for (const seat of config.seats.values()) {
     const server = config.servers.get(seat.server);
-    const ok = server && (await readOutbox(io.fetch, server, seat.board, seat.outboxDoc)) !== null;
+    let ok = false;
+    while (server && !ok) {
+      ok = (await readOutbox(io.fetch, server, seat.board, seat.outboxDoc)) !== null;
+      if (ok || io.now() >= answerBy) break;
+      await io.sleep(2_000);
+    }
     say(`${seat.id}: ${seat.server} ${ok ? 'answered' : 'did not answer'} the relay's outbox read`);
     if (ok) answered++;
   }
-  return started && answered === config.seats.size ? 0 : 1;
+  const passed = started && answered === config.seats.size;
+  for (const r of revokes) {
+    if (!passed) {
+      say(
+        `left record ${r.id} on ${r.where} live, because the check failed; run again to revoke it`,
+      );
+      continue;
+    }
+    await revokeToken(r.call, r.id);
+    say(`revoked record ${r.id} on ${r.where}`);
+  }
+  return passed ? 0 : 1;
 }
 
 export function parseArgs(argv: readonly string[]): InstallOptions {
