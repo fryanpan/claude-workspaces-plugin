@@ -122,7 +122,11 @@ function readRun(run: string): Record<string, number> {
   const jobs = JSON.parse(
     gh(['api', `repos/{owner}/{repo}/actions/runs/${run}/jobs?per_page=100`, '--jq', '.jobs']),
   ) as { id: number; name: string; conclusion: string | null }[];
-  const server = jobs.filter((j) => j.name.startsWith('server'));
+  const server = jobs.filter(
+    // `server-core` runs the same files with every board on the collab core;
+    // its times would overwrite these rows in whatever order the API lists jobs.
+    (j) => j.name.startsWith('server') && !j.name.startsWith('server-core'),
+  );
   const bad = server.filter((j) => j.conclusion !== 'success');
   if (server.length === 0 || bad.length > 0) {
     console.error(

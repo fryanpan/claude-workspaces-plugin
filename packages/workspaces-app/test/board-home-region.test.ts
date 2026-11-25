@@ -96,15 +96,53 @@ describe('createBoardHomeRegion', () => {
     const h = home();
     serve({ generating: false });
     return h.loadHome().then(() => {
-      expect(h.scheduled).toHaveLength(1);
+      // The brief and the notes no task took each repaint once, both through
+      // the guard.
+      expect(h.scheduled).toHaveLength(2);
     });
+  });
+
+  it('reads the notes no task took from their own route and hands them to the activity pane', async () => {
+    const h = home();
+    const urls: string[] = [];
+    const agents = [
+      {
+        agent: 'Riverbend',
+        placement: 'unattachable',
+        latestAt: 5,
+        notes: [{ at: 5, kind: 'turn', text: 'Parked.' }],
+        more: 0,
+      },
+    ];
+    serve({ agents }, (url) => urls.push(url));
+    await h.loadAgentNotes();
+    expect(urls).toEqual(['/workspaces/w-1/agent-notes']);
+    h.renderHomeRegion();
+    expect(homeActivityData.value.agentNotes?.map((a) => [a.agent, a.placement])).toEqual([
+      ['Riverbend', 'unattachable'],
+    ]);
+    // A read that never reached the server keeps what was there.
+    serve(null);
+    await h.loadAgentNotes();
+    h.renderHomeRegion();
+    expect(homeActivityData.value.agentNotes).toHaveLength(1);
+  });
+
+  it('reads the notes no task took on every Home load, but not on the brief poll', async () => {
+    const h = home();
+    const urls: string[] = [];
+    serve({ generating: true }, (url) => urls.push(url));
+    await h.loadHome();
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(urls.filter((u) => u.endsWith('/agent-notes'))).toHaveLength(1);
+    expect(urls.filter((u) => u.includes('/home?'))).toHaveLength(2);
   });
 
   it('keeps polling while the server says a brief is still being generated', async () => {
     const h = home();
     let calls = 0;
-    serve({ generating: true }, () => {
-      calls += 1;
+    serve({ generating: true }, (url) => {
+      if (url.includes('/home?')) calls += 1;
     });
     await h.loadHome();
     expect(calls).toBe(1);

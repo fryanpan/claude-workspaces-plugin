@@ -226,4 +226,41 @@ describe('AgentNoteLog', () => {
     expect(newest?.sessionId).toBeUndefined();
     expect(oldest?.sessionId).toBe('sess-7');
   });
+
+  it('reads every agent on the board since a time, newest first, and never another board', () => {
+    log.append(note({ agent: 'Riverbend', at: 30 }));
+    log.append(note({ at: 10 }));
+    log.append(note({ at: 20 }));
+    log.append(note({ at: 40, workspaceId: OTHER_WS }));
+    expect(log.readBoard(WS, 15, 10).lines.map((n) => [n.agent, n.at])).toEqual([
+      ['Riverbend', 30],
+      ['Cartographer', 20],
+    ]);
+  });
+
+  it('caps each agent separately, so a chatty agent cannot push a quiet one out', () => {
+    log.append(note({ agent: 'Riverbend', at: 1, text: 'the quiet one' }));
+    for (let i = 0; i < 30; i++) log.append(note({ at: 100 + i, text: `chatty ${i}` }));
+    const read = log.readBoard(WS, 0, 2);
+    expect(read.lines.map((n) => n.text)).toEqual(['chatty 29', 'chatty 28', 'the quiet one']);
+    // Keyed by the roster fold, and only for the agent the cap cut.
+    expect(read.skipped.get('cartographer')).toBe(28);
+    expect(read.skipped.get('riverbend')).toBeUndefined();
+  });
+
+  it("keeps an agent's newest notes by time, not by where they sit in the file", () => {
+    // A delayed hook appends its newer note BEFORE an older one.
+    log.append(note({ at: 50, text: 'newest, appended first' }));
+    log.append(note({ at: 10, text: 'oldest' }));
+    log.append(note({ at: 20, text: 'middle' }));
+    const read = log.readBoard(WS, 0, 2);
+    expect(read.lines.map((n) => n.text)).toEqual(['newest, appended first', 'middle']);
+    expect(read.skipped.get('cartographer')).toBe(1);
+  });
+
+  it('reads nothing, and skips nothing, on a board with no log', () => {
+    const read = log.readBoard(OTHER_WS, 0, 10);
+    expect(read.lines).toEqual([]);
+    expect(read.skipped.size).toBe(0);
+  });
 });

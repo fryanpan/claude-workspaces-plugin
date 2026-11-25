@@ -123,6 +123,13 @@ function parseLine(line: string): LoggedAgentNote | undefined {
   };
 }
 
+/** `readBoard`'s answer: the kept lines, and per agent (keyed by
+ *  `normalizeAgent`) how many notes the per-agent cap left out. */
+export interface BoardNotesRead {
+  lines: LoggedAgentNote[];
+  skipped: ReadonlyMap<string, number>;
+}
+
 /**
  * Per-board, append-only storage for notes no row would take.
  *
@@ -188,6 +195,38 @@ export class AgentNoteLog {
     const want = Math.max(0, cap);
     const found = this.tailMatching(workspaceId, (n) => normalizeAgent(n.agent) === who, want);
     return found.sort((a, b) => b.at - a.at);
+  }
+
+  /**
+   * Every agent's lines on this board at or after `since`, newest first —
+   * the read behind Home's "Not on a task" list (`agent-note-placement.ts`).
+   *
+   * The cap is PER AGENT, so one chatty agent cannot push a quiet one off
+   * the list, and it keeps each agent's newest `perAgent` by `at`, not by
+   * file position: a delayed hook or a clock change appends a newer note
+   * before an older one, and a cut in file order would drop the newer.
+   * Notes past an agent's cap are counted in `skipped`, not kept. The walk
+   * keeps the same two bounds as every read here, which also bound what is
+   * held before the cut.
+   */
+  readBoard(workspaceId: string, since: number, perAgent: number): BoardNotesRead {
+    const cap = Math.max(0, perAgent);
+    const inWindow = this.tailMatching(workspaceId, (n) => n.at >= since, Number.MAX_SAFE_INTEGER);
+    const byAgent = new Map<string, LoggedAgentNote[]>();
+    for (const n of inWindow) {
+      const key = normalizeAgent(n.agent);
+      const list = byAgent.get(key) ?? [];
+      list.push(n);
+      byAgent.set(key, list);
+    }
+    const lines: LoggedAgentNote[] = [];
+    const skipped = new Map<string, number>();
+    for (const [key, list] of byAgent) {
+      list.sort((a, b) => b.at - a.at);
+      lines.push(...list.slice(0, cap));
+      if (list.length > cap) skipped.set(key, list.length - cap);
+    }
+    return { lines: lines.sort((a, b) => b.at - a.at), skipped };
   }
 
   /**

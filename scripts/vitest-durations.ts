@@ -93,7 +93,11 @@ function readRun(run: string): Record<string, number> {
   const jobs = JSON.parse(
     gh(['api', `repos/{owner}/{repo}/actions/runs/${run}/jobs?per_page=100`, '--jq', '.jobs']),
   ) as { id: number; name: string; conclusion: string | null }[];
-  const client = jobs.filter((j) => j.name.startsWith('client'));
+  const client = jobs.filter(
+    // Core-mode twins run the same files on a different sync path; mixing their
+    // times into the rows would make each row whichever job the API listed last.
+    (j) => j.name.startsWith('client') && !j.name.startsWith('client-browser-core'),
+  );
   const bad = client.filter((j) => j.conclusion !== 'success');
   if (client.length === 0 || bad.length > 0) {
     console.error(

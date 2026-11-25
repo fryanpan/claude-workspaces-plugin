@@ -179,6 +179,7 @@ import { type AgentIdentityRoutesContext } from './routes/agent-identity.ts';
 import { type AppRoutesContext } from './routes/apps.ts';
 import { type ArchiveRoutesContext, createArchiveRoutes } from './routes/archive.ts';
 import { type AuthShareRoutesContext } from './routes/auth-share.ts';
+import type { BoardAgentNotesRoutesContext } from './routes/board-agent-notes.ts';
 import { boardImportRoutesContext } from './routes/board-import.ts';
 import { type BoardSocketRootsRoutesContext } from './routes/board-socket-roots.ts';
 import { type BoardTokenRoutesContext } from './routes/board-tokens.ts';
@@ -2976,6 +2977,9 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
   /** The chat-audit counters — one store, read and written by two routes. */
   const chatAuditRoutesCtx: ChatAuditRoutesContext = { chatAudit, j, safeJson };
 
+  /** Home's "Not on a task" list — the board's unplaced-note log, per agent. */
+  const boardAgentNotesRoutesCtx: BoardAgentNotesRoutesContext = { agentNoteLog, agentNotes, j };
+
   /** Recall's signed webhook — bot status changes and calendar sync events,
    *  which arrive on the same endpoint because webhooks are workspace-level
    *  at the vendor. */
@@ -3438,6 +3442,13 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     dispatchReports,
     agentNotes,
     agentNoteLog,
+    // To the board's pages only, and with no words in the frame: Home
+    // re-reads its "Not on a task" list, and no agent acts on another
+    // agent's turn, so the frame skips every agent's stream.
+    announceAgentNote: (workspaceId) => {
+      const frame = { event: 'agent.noted', workspaceId };
+      sse.broadcastTransient(`ws~${workspaceId}`, frame, { skipAgentStreams: true });
+    },
     chatAudit,
     isCoachSession: (workspaceId, agentName) => coachWiring.isCoachSession(workspaceId, agentName),
     coachSessionTurn: (workspaceId, note, cwd) => {
@@ -3720,6 +3731,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
           workspaceRoutesCtx,
           taskRoutesCtx,
           chatAuditRoutesCtx,
+          boardAgentNotesRoutesCtx,
           libraryRoutesCtx,
           docMoveRoutesCtx,
           handleArchiveRoutes,

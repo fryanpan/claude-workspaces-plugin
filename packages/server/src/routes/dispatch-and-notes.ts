@@ -308,6 +308,7 @@ export async function handleDispatchAndNoteRoutes(
     if (!res.ok) return j(404, { error: res.error });
     proposeAllowRule(res.task, note);
     agentNotes.record({ ...note, taskId: res.task.id, workspaceId: res.task.workspaceId });
+    ctx.announceAgentNote?.(res.task.workspaceId);
     return noted({
       ok: true,
       taskId: res.task.id,
@@ -431,6 +432,7 @@ export async function handleDispatchAndNoteRoutes(
       // answers with the PREVIOUS turn rather than with this one.
       const nudge = judgeAndRecord(ctx, boardId, note);
       agentNotes.record({ ...note, taskId: res.task.id, workspaceId: res.task.workspaceId });
+      ctx.announceAgentNote?.(res.task.workspaceId);
       return noted({
         ok: true,
         taskId: res.task.id,
@@ -483,6 +485,8 @@ export async function handleDispatchAndNoteRoutes(
       ...(task ? { taskId: task.id } : {}),
       ...(target.ambiguous ? { needsFiling: true } : {}),
     });
+    // After the ring: a placed note turns Home's header to "went to <task>".
+    if (logged || task) ctx.announceAgentNote?.(boardId);
     return noted({
       ok: true,
       workspaceId: boardId,
