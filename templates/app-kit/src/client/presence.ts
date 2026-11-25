@@ -1,8 +1,8 @@
 /**
  * A page's half of the presence socket (`src/presence.ts` is the server's):
  * says "I am on this doc" when it opens, and keeps the list of everyone else
- * on it, as the server last sent it. Reconnects when the socket drops. No
- * DOM: the tests run it in Bun.
+ * on it and the reader's own role, as the server last sent them. Reconnects
+ * when the socket drops. No DOM: the tests run it in Bun.
  */
 
 export interface PresencePerson {
@@ -14,6 +14,10 @@ export interface PresenceHandle {
   /** Everyone else on this doc, by name. */
   here(): PresencePerson[];
   onChange(fn: (here: PresencePerson[]) => void): void;
+  /** The reader's role on this doc, as the server last said, or null. */
+  role(): string | null;
+  /** Called each time the server says the role, changed or not. */
+  onRole(fn: (role: string) => void): void;
   close(): void;
 }
 
@@ -31,6 +35,8 @@ const isPerson = (v: unknown): v is PresencePerson =>
 export function connectPresence(url: string, opts: PresenceOptions = {}): PresenceHandle {
   let here: PresencePerson[] = [];
   const listeners: Array<(here: PresencePerson[]) => void> = [];
+  const roleListeners: Array<(role: string) => void> = [];
+  let role: string | null = null;
   let ws: WebSocket | null = null;
   let closed = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -55,8 +61,12 @@ export function connectPresence(url: string, opts: PresenceOptions = {}): Presen
     socket.addEventListener('message', (ev) => {
       if (typeof ev.data !== 'string') return;
       try {
-        const msg = JSON.parse(ev.data) as { here?: unknown };
+        const msg = JSON.parse(ev.data) as { here?: unknown; role?: unknown };
         if (Array.isArray(msg.here)) set(msg.here.filter(isPerson));
+        if (typeof msg.role === 'string') {
+          role = msg.role;
+          for (const fn of roleListeners) fn(msg.role);
+        }
       } catch {
         // Not ours: ignore it.
       }
@@ -75,6 +85,10 @@ export function connectPresence(url: string, opts: PresenceOptions = {}): Presen
     here: () => here,
     onChange: (fn) => {
       listeners.push(fn);
+    },
+    role: () => role,
+    onRole: (fn) => {
+      roleListeners.push(fn);
     },
     close: () => {
       closed = true;
