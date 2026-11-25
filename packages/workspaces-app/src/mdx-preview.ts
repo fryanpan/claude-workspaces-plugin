@@ -15,7 +15,12 @@
 import { readOpenTag } from '@claude-workspaces/core/tag-props';
 import { type MdxChart, chartOf, drawChart } from './mdx-chart.ts';
 import { type PlotChartSummary, plotChartOf, renderPlotChart } from './mdx-plot-chart.ts';
-import { type StreetMapSummary, renderStreetMap, streetMapOf } from './mdx-street-map.ts';
+import {
+  type MapStateFor,
+  type StreetMapSummary,
+  renderStreetMap,
+  streetMapOf,
+} from './mdx-street-map.ts';
 
 export type MdxKind = 'esm' | 'expr' | 'jsx';
 
@@ -91,8 +96,15 @@ function isImportName(s: string): boolean {
 const DEFAULT_WIDTH = 640;
 
 /** Replace `host`'s children with the block's quiet view, a chart drawn
- *  `width` pixels wide (the host's own width when it has one). */
-export function renderMdxSummary(host: HTMLElement, summary: MdxSummary, width?: number): void {
+ *  `width` pixels wide (the host's own width when it has one). A
+ *  `<StreetMap>` with an `id` reads its live state from `stateFor`. Returns
+ *  the release for what the view mounted: the map, and its state hook. */
+export function renderMdxSummary(
+  host: HTMLElement,
+  summary: MdxSummary,
+  width?: number,
+  stateFor?: MapStateFor,
+): () => void {
   host.replaceChildren();
   host.dataset.kind = summary.kind;
   const head = document.createElement('div');
@@ -125,13 +137,14 @@ export function renderMdxSummary(host: HTMLElement, summary: MdxSummary, width?:
     note(host, 'mdx-chart-site-ignores', 'The site draws nothing for', chart.siteIgnores);
   }
   if (summary.plot) renderPlotChart(host, summary.plot);
-  if (summary.map) renderStreetMap(host, summary.map);
+  const release = summary.map ? renderStreetMap(host, summary.map, stateFor) : () => {};
   if (summary.children) {
     const kids = document.createElement('div');
     kids.className = 'mdx-children';
     kids.textContent = summary.children;
     host.appendChild(kids);
   }
+  return release;
 }
 
 function note(host: HTMLElement, className: string, lead: string, props: string[]): void {

@@ -16,9 +16,8 @@
  *  - the declarations with the TypeScript compiler, one `.d.ts` per source
  *    file, with relative `.ts` specifiers rewritten to `.js`.
  *
- * Each entry becomes `{ types, default }` in the packed `package.json`; the
- * in-repo entries the board alone uses (`./draw`, `./placed`) are not
- * exported. The version is the one in `package.json`; the tarball is
+ * Each entry becomes `{ types, default }` in the packed `package.json`. The
+ * version is the one in `package.json`; the tarball is
  * `claude-workspaces-components-<version>.tgz`.
  */
 import { spawnSync } from 'node:child_process';

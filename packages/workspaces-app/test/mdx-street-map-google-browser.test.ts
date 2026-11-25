@@ -140,7 +140,7 @@ describe.skipIf(CHROME === null)('a StreetMap on the google basemap', () => {
       expect(r.refused.osmTiles).toBeGreaterThan(0);
       expect(r.refused.googleTiles).toBe(0);
       expect(r.refused.notice).toBe(
-        "Google Maps refused this server's key, so this map is drawn on OpenStreetMap.",
+        'Google Maps refused this key, so this map is drawn on OpenStreetMap.',
       );
       expect(r.refused.markerPaths).toBe(12);
     },

@@ -194,3 +194,81 @@ export function startChild(
   };
   return child;
 }
+
+/**
+ * A pass-through in front of a server that can hold one `tools/call` answer,
+ * so a test can push a frame while the relay is waiting on a call. It records
+ * every byte it streams back, so the test knows the frame reached the relay
+ * before the call is let go. Port 0, loopback only.
+ */
+export interface HoldingProxy {
+  base: string;
+  /** Text of every response body streamed back so far. */
+  streamed(): string;
+  /** Hold the next `tools/call` answer: `answered` once the server answered, `release` to let it go. */
+  holdNextCall(): { answered(): boolean; release(): void };
+  stop(): void;
+}
+
+export function startHoldingProxy(upstream: string): HoldingProxy {
+  let streamed = '';
+  let hold: { answered: boolean; gate: Promise<void> } | null = null;
+  const decoder = new TextDecoder();
+  const server = Bun.serve({
+    port: 0,
+    hostname: '127.0.0.1',
+    idleTimeout: 0,
+    async fetch(req) {
+      const url = new URL(req.url);
+      const headers = new Headers(req.headers);
+      // Plain bytes, so `streamed` reads what the relay reads.
+      headers.delete('accept-encoding');
+      headers.delete('host');
+      const body = req.method === 'GET' || req.method === 'HEAD' ? undefined : await req.text();
+      const isCall = body?.includes('"tools/call"') === true;
+      const res = await fetch(`${upstream}${url.pathname}${url.search}`, {
+        method: req.method,
+        headers,
+        body,
+        signal: req.signal,
+      });
+      // fetch has already decoded the body, so its length and coding no longer apply.
+      const out = new Headers(res.headers);
+      out.delete('content-encoding');
+      out.delete('content-length');
+      const current = isCall ? hold : null;
+      if (current) {
+        hold = null;
+        const buffered = await res.arrayBuffer();
+        streamed += decoder.decode(buffered);
+        current.answered = true;
+        await current.gate;
+        return new Response(buffered, { status: res.status, headers: out });
+      }
+      if (!res.body) return new Response(null, { status: res.status, headers: out });
+      const tee = new TransformStream<Uint8Array, Uint8Array>({
+        transform(chunk, ctl) {
+          streamed += decoder.decode(chunk, { stream: true });
+          ctl.enqueue(chunk);
+        },
+      });
+      return new Response(res.body.pipeThrough(tee), { status: res.status, headers: out });
+    },
+  });
+  return {
+    base: `http://127.0.0.1:${server.port}`,
+    streamed: () => streamed,
+    holdNextCall() {
+      let release = () => {};
+      const entry = {
+        answered: false,
+        gate: new Promise<void>((r) => {
+          release = r;
+        }),
+      };
+      hold = entry;
+      return { answered: () => entry.answered, release: () => release() };
+    },
+    stop: () => server.stop(true),
+  };
+}

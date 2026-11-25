@@ -276,13 +276,15 @@ literal props, and the JSON file its `src` names beside the doc, into a
 spec (markers, radius rings in feet, category-coloured points, legend
 entries); core's `map-basemaps.ts` is the list of street maps a tag may name
 by key, with the origins each loads tiles from, and is the one place a
-provider is added. `mdx-street-map.ts` reads the `src` file through the
-doc's files route, draws the legend, and fetches Leaflet from
-`/app/map/map.js` (built from `map-entry.ts`, which re-exports the components
-package's `draw.ts`) and its stylesheet the first time a doc shows a map;
-markers and rings are SVG paths, points one canvas. The package's map
-component draws through the same `draw.ts`, so a site's map and a doc's are
-one renderer.
+provider is added. `mdx-street-map.ts` draws nothing itself: it reads the
+`src` file through the doc's files route, asks for a keyed basemap's key,
+and mounts the components package's map (`components/src/map.ts`, fetched
+from `/app/map/map.js`, built from `map-entry.ts`, with Leaflet the first
+time a doc shows a map) with the merged props and the doc's live state hook
+for the tag's `id`, so an agent's `set_component_state` moves the pins on
+every open page. A site mounts the same file, so a site's map and a doc's
+are one component: one legend, one basemap fallback, one renderer
+(`draw.ts`; markers and rings are SVG paths, points one canvas).
 The files route serves a `src` file only when a `<StreetMap>` in the doc's
 live content names exactly that path (`doc-file-scope.ts` `mapDataFolder`).
 `google` is the one keyed basemap and the default for a tag that names

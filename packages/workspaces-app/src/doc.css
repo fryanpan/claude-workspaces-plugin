@@ -1203,11 +1203,14 @@ body.is-archived #editor .ProseMirror {
   border-radius: var(--radius-sm);
   white-space: pre-wrap;
 }
-/* A <StreetMap> (mdx-street-map.ts): a Leaflet map in the page. The slot is
-   its own stacking context, so Leaflet's panes (z-index 400 to 1000) stay
-   under the doc's sticky bars and sheets. Its height is set inline before
-   Leaflet loads, so the doc does not move when the map arrives. */
-#editor > .ProseMirror .mdx-map {
+/* A <StreetMap> (mdx-street-map.ts): the components package's map
+   (`components/src/map.ts`) mounted in the page, restyled here to the doc's
+   tokens. The slot is its own stacking context, so Leaflet's panes (z-index
+   400 to 1000) stay under the doc's sticky bars and sheets. The host holds the
+   map's height while Leaflet loads (`.is-pending`), so the doc does not move
+   when the map arrives. */
+#editor > .ProseMirror .mdx-map.is-pending,
+#editor > .ProseMirror .mdx-map .cw-map-slot {
   position: relative;
   z-index: 0;
   isolation: isolate;
@@ -1217,6 +1220,30 @@ body.is-archived #editor .ProseMirror {
   background: var(--bg-panel);
   cursor: auto;
   overflow: hidden;
+}
+#editor > .ProseMirror .mdx-map .cw-map-title {
+  display: none;
+}
+#editor > .ProseMirror .mdx-map .cw-map-subtitle {
+  margin: 2px 0 0;
+  font: 14px / 1.4 var(--sans);
+  color: var(--fg-muted);
+}
+#editor > .ProseMirror .mdx-map .cw-map-note,
+#editor > .ProseMirror .mdx-map .cw-map-notice {
+  margin: 4px 0 0;
+  font: 12px / 1.4 var(--sans);
+  color: var(--fg-muted);
+}
+#editor > .ProseMirror .mdx-map .cw-map-error {
+  padding: 8px 12px;
+  font: 13px / 1.4 var(--mono);
+  color: var(--red);
+  background: rgba(215, 58, 73, 0.08);
+  border: 0;
+  border-left: 3px solid var(--red);
+  border-radius: var(--radius-sm);
+  white-space: pre-wrap;
 }
 #editor > .ProseMirror .mdx-map .leaflet-container {
   font: 12px / 1.4 var(--sans);
@@ -1240,7 +1267,8 @@ body.is-archived #editor .ProseMirror {
   color: #1f2937;
   white-space: pre-wrap;
 }
-#editor > .ProseMirror .mdx-map-legend {
+#editor > .ProseMirror .mdx-map .cw-map-legend,
+#editor > .ProseMirror .mdx-map .cw-map-layers {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 16px;
@@ -1250,24 +1278,29 @@ body.is-archived #editor .ProseMirror {
   font: 13px / 1.4 var(--sans);
   color: var(--fg);
 }
-#editor > .ProseMirror .mdx-map-legend li {
+#editor > .ProseMirror .mdx-map .cw-map-legend li {
   display: flex;
   align-items: center;
   gap: 6px;
   margin: 0;
 }
-#editor > .ProseMirror .mdx-map-swatch {
+#editor > .ProseMirror .mdx-map .cw-map-swatch {
   flex: none;
   width: 10px;
   height: 10px;
   border-radius: 50%;
 }
-#editor > .ProseMirror .mdx-map-swatch.is-ring {
+#editor > .ProseMirror .mdx-map .cw-map-swatch.is-ring {
   width: 12px;
   height: 12px;
   box-sizing: border-box;
   border: 2px solid;
   background: transparent;
+}
+/* Last in the block, so a part the map hides stays hidden over the display
+   the rules above give it. */
+#editor > .ProseMirror .mdx-map [hidden] {
+  display: none;
 }
 /* Each line's own name and last value, at its end inside the plot: the site's
    chart labels its lines there instead of carrying a legend. */
