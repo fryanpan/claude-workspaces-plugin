@@ -478,10 +478,9 @@ the machine.
 **A restart Team Lead asks for.** When `CW_LEAD_INBOX_DOC` (the lead seat's
 inbox doc) and `CW_RELAY_AGENT_ID` (the agent id of the org relay's board
 token) are both set, `lead.sh` runs `lead-restart.ts` every 30 seconds.
-Nothing sets them for you: whoever installs the relay sets both by hand, as
-Fly secrets on the project's app (`fly secrets set CW_LEAD_INBOX_DOC=task:t-…
-CW_RELAY_AGENT_ID=agent-…`), taking the values from the lead seat in the
-relay config, and `entrypoint.sh` passes them to the lead. Each check is cut
+`bun run relay:install` sets both as Fly secrets on the project's app, from
+the lead's seat ([Installing the org relay](#installing-the-org-relay)), and
+`entrypoint.sh` passes them to the lead. Each check is cut
 off after 20 seconds, and each call it makes after 10, so a board server that
 hangs cannot stop the supervisor watching the session. It
 reads the inbox doc's threads over the board socket and answers `restart`
@@ -711,6 +710,67 @@ key reaches its one repo, so the machine can push nowhere else. The deploy
 also unsets `CW_GITHUB_PUSH_TOKEN` if the app still has one: a project
 machine holds no classic token. The request and the file are in
 [lead-sandbox.md](lead-sandbox.md), "A lead pushes through its board server".
+
+## Installing the org relay
+
+The org relay carries messages between the leads' seats
+([cross-board.md](../architecture/cross-board.md)). It runs on the Mac.
+`bun run relay:install` installs it, or brings an install up to date, for the
+seats in `infra/org-relay/seats.json`. That file names each seat by its role
+and never by a board or doc id. A Mac seat names its agent id. A project seat
+names its project in `machines.json`, and its agent is that project's lead
+(`<project>-lead`, or the seat's `agentName`). Run it with `--dry-run` first.
+The dry run prints the plan with every token value redacted, and it writes,
+mints and files nothing. It does read each server, over `fly ssh console` for
+a project machine.
+
+The script does these steps in order:
+
+1. **It finds each seat's board, tasks and token.** The board is the one
+   board on the seat's server whose lead is the seat's agent. If there is not
+   exactly one, the script stops and asks for `--board <seat>=<board id>`.
+   The seat's outbox and inbox are the tasks "Relay outbox: <seat>" and
+   "Relay inbox: <seat>". The script files each one if it is missing. Then it
+   mints the relay's `at2` (agent `relayAgentId`) on each board through
+   `/api/board-tokens`. On the Mac it calls the server's loopback directly. On
+   a project machine it runs curl on the machine's loopback, as `cw`, over
+   `fly ssh console`, the same way as the push-key step below. If the
+   installed config already holds a token whose record is live, the script
+   keeps it. **`--remint` mints a new token, which replaces the old one.**
+   The script revokes the old record only after the relay has restarted on
+   the new config.
+2. **It writes the config.** The file is
+   `~/Library/Application Support/claude-workspaces/relay/relay-config.json`,
+   at mode 600, in the shape `relay-config.ts` reads. The script checks the
+   config with that parser before it writes. A server's address is the
+   project's router host from the Terraform outputs. A server with Access in
+   front needs its seat to name `accessToken`, the Cloudflare service token's
+   name. The script reads the token's client id and secret from the Keychain
+   under `tokenServices` names. No token value goes into an argument, onto
+   stdout or into a log.
+3. **It writes and loads the LaunchAgent.** The agent is
+   `~/Library/LaunchAgents/com.fryanpan.claude-workspaces-relay.plist`. It
+   runs `relay-bin.ts` from prod's checkout with prod's bun, with
+   `CW_RELAY_CONFIG` and `CW_RELAY_STATE_DIR` (`relay/state`) set, and
+   writes its log to `relay/relay.log`. If the plist changed, the script
+   loads it again. If it did not, the script restarts the relay with
+   `kickstart -k`.
+4. **It sets the lead's two settings.** It sets `CW_LEAD_INBOX_DOC` and
+   `CW_RELAY_AGENT_ID` with `fly secrets import`, values on stdin, on each
+   project app whose lead is a seat. **This restarts that machine.** So the
+   script records what it set in `relay/installed.json` and skips an app
+   whose values have not changed.
+5. **It checks the result.** The relay must log `running: N seats` after this
+   start, and every seat's server must answer the relay's own read of the
+   seat's outbox. If either check fails, the script exits 1.
+
+Run the script again whenever `seats.json` changes. A second run with nothing
+changed mints nothing, files nothing and sets no secret. It does restart the
+relay.
+
+The relay runs as the Mac's own user, so any process of that user can read
+its config. The separate macOS user that
+[security.md](../architecture/security.md) asks for is not installed yet.
 
 ## GitHub events for a board here
 

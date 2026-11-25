@@ -1,0 +1,18 @@
+{
+  "relayAgentId": "agent-relay",
+  "macOrganization": "home",
+  "seats": [
+    {
+      "id": "team-lead",
+      "server": "mac",
+      "agentId": "agent-team-lead",
+      "crossOrganization": true
+    },
+    {
+      "id": "moi-lead",
+      "project": "moi",
+      "crossOrganization": true,
+      "restartFrom": ["team-lead"]
+    }
+  ]
+}
