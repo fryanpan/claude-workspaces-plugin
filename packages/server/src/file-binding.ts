@@ -45,7 +45,7 @@ import { backgroundPasses } from './event-loop.ts';
 import { statStampSync } from './file-stamp.ts';
 import { patchFlatText } from './flat-text-patch.ts';
 import { showFile } from './git-diff.ts';
-import { gitConflictHint } from './git-provenance.ts';
+import { gitConflictHint, gitTracking } from './git-provenance.ts';
 import { isWithinRoot } from './safe-path.ts';
 import { type BoundStatResult, boundFiles, isDataless, redactBoundPath } from './slow-fs.ts';
 
@@ -789,12 +789,32 @@ export class FileBindings {
    * existed, so it stays unset and the Library counts it as not made here.
    * Never changed once set: a later re-attach (a restart, a home move that
    * exports an empty doc and binds it again) is not the doc's first fill.
+   *
+   * One exception, decided right after: an existing file inside a git repo
+   * that git does not track was written by somebody here, not pulled. That
+   * is how an agent makes most board docs (write the file, then bind it),
+   * so it flips to false. A pull or a clone only ever leaves tracked files,
+   * and a file outside any repo has no such evidence, so both stay true.
    */
-  private noteFirstFill(doc: LiveDoc, wasEmpty: boolean, fileExisted: boolean): void {
+  private noteFirstFill(doc: LiveDoc, abs: string, wasEmpty: boolean, fileExisted: boolean): void {
     if (doc.meta.seededFromFile !== undefined) return;
     if (fileExisted && !wasEmpty) return;
     doc.meta.seededFromFile = fileExisted;
     this.p.schedulePersist(doc);
+    if (!fileExisted) return;
+    const docId = doc.meta.docId;
+    void gitTracking(abs).then((tracking) => {
+      if (tracking !== 'untracked') return;
+      // Still in memory, still undecided, still bound to this file and still
+      // its writer. A doc evicted, archived or rebound meanwhile, or one a
+      // newer doc took the path from, keeps its answer and writes nothing.
+      const live = this.p.residentDoc(docId);
+      if (live !== doc || live.meta.seededFromFile !== true) return;
+      const binding = this.bindings.get(docId);
+      if (binding?.path !== abs || binding.writeBackSuspended) return;
+      live.meta.seededFromFile = false;
+      this.p.schedulePersist(live);
+    });
   }
 
   attachFile(
@@ -862,7 +882,7 @@ export class FileBindings {
         return { ok: false, error: 'read-failed' };
       }
     }
-    this.noteFirstFill(doc, wasEmpty, fileExists());
+    this.noteFirstFill(doc, abs, wasEmpty, fileExists());
     const existing = this.bindings.get(docId);
     if (existing?.writeTimer) clearTimeout(existing.writeTimer);
     if (existing?.readTimer) clearTimeout(existing.readTimer);

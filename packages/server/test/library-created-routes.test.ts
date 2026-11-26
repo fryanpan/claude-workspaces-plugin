@@ -131,6 +131,20 @@ describe('library created time', () => {
     expect(row?.created).toBeUndefined();
   });
 
+  it('dates a file an agent wrote and has not committed as created, and a pulled one not', async () => {
+    // An agent writes a new file, then binds it: the usual way a board doc
+    // is made. Untracked, so nothing pulled it there.
+    writeFileSync(join(repo, 'docs', 'quay-plan.md'), '# Quay plan\n');
+    const made = await bindDoc('quay-plan', join(repo, 'docs', 'quay-plan.md'), 'Quay plan');
+    await waitFor(async () => ((await rowNamed('quay-plan.md'))?.created ?? 0) > 0);
+    expect((await rowNamed('quay-plan.md'))?.docId).toBe(made);
+    // Control on the same server: a tracked file whose birth is just as
+    // fresh, as a pull leaves it, stays off.
+    const pulled = await bindDoc('handbook', join(repo, 'handbook.md'), 'Volunteer handbook');
+    await waitFor(async () => (await rowNamed('handbook.md'))?.docId === pulled);
+    expect((await rowNamed('handbook.md'))?.created).toBeUndefined();
+  });
+
   it('gives a created time to what the board made: a whiteboard and a new file', async () => {
     const made = await at(`/workspaces/${WS}/whiteboards`, {
       method: 'POST',

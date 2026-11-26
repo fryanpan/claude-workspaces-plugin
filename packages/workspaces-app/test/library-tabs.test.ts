@@ -126,15 +126,15 @@ describe('the Recently Viewed / Modified / Created tabs', () => {
   });
 
   it('keeps a burst opened under one tab shut under the other', async () => {
-    // Three board docs made and changed seconds apart: one burst under both
-    // Modified and Created, with the same newest file heading each.
+    // Three board docs written and changed seconds apart: one burst under
+    // both Modified and Created, with the same newest file heading each.
     const burst: LibraryPayload = {
       ...PAYLOAD,
-      files: ['Quay layout', 'Tide chart', 'Ferry flow'].map((name, i) => ({
+      files: ['quay-layout.md', 'tide-chart.md', 'ferry-flow.md'].map((name, i) => ({
         name,
         at: NOW - i * 1_000,
         created: NOW - i * 1_000,
-        href: `/workspaces/${WS}/whiteboards/b-${i}`,
+        href: `/workspaces/${WS}/docs/b-${i}`,
         docId: `b-${i}`,
       })),
     };

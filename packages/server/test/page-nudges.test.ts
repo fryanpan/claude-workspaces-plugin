@@ -33,6 +33,11 @@ describe('which listing changes count', () => {
     expect(listingChanged(a, { ...a, pendingFileWrite: true })).toBe(false);
   });
 
+  it('whether the board made a doc is news: it moves the doc onto Recently Created', () => {
+    const bound = row({ title: 'Harborlight', seededFromFile: true });
+    expect(listingChanged(bound, row({ title: 'Harborlight', seededFromFile: false }))).toBe(true);
+  });
+
   it('names every set a row left or joined', () => {
     expect(setsOf({ workspaceId: 's-1' }, { setId: 's-2', workspaceId: 's-1' })).toEqual([
       's-1',
