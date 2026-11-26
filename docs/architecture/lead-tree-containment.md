@@ -181,7 +181,7 @@ root are refused before anything is made.
 | `doc-copies.ts` `git status` (122–125) | the uncommitted mark | barred | barred (sync, section I) |
 | `doc-key.ts` `repoIdentityAt`, `docKeyForPath` (215, 276), `doc-origin-repo.ts` `findWorktreeRoot`, `gitCommonDir` (62, 114) | which repository a doc is in, and so its `docKey`, which is looked up across every board (`doc-store.ts` 2559–2571) | `readOriginUrl` is barred, but a lead's `.git` pointer file is read and followed. A root that is a worktree of the owner's repository therefore gets the owner repository's key, and a bind there can return the owner's doc of the same relative path on another board (review H1) | `findWorktreeRoot` and `gitCommonDir` answer null for a covered path, so `repoIdentityAt` and `docKeyForPath` are null. The bind mints a doc bound to that path alone, and `noteCheckout` and `mount-store.locate` record nothing |
 | `git-hardening.ts` `repoOf`, `readLine` (86–145) | finds the repository for `gitBarred` | `lstatSync`, `realpathSync`, `readLine`; stops at a pointer under a root | `readLine` answers null for a covered path, so a `.git` file there is `refused` and the path stays barred |
-| `doc-create-conflict.ts` (50), `safe-path.ts` (37, 61), `git-provenance.ts` (156) | a path's real spelling, to compare | `realpathSync` | unchanged. A spelling is the only output, and every read or write that follows the comparison goes through `tree-fs`. The cost left is the autofs hang listed under "What this does not close" |
+| `doc-create-conflict.ts` (50), `safe-path.ts` (37, 61), `git-provenance.ts` (156, 243) | a path's real spelling, to compare | `realpathSync` | unchanged. A spelling is the only output, and every read or write that follows the comparison goes through `tree-fs`. The cost left is the autofs hang listed under "What this does not close" |
 
 ### H. Watches
 
@@ -210,6 +210,7 @@ only the asynchronous ones become sandboxed git. The synchronous ones keep
 | `git-diff.ts` `gitAsync` (57–59) | the diff review's reads | sandboxed |
 | `git-diff.ts` `gitSync` (35–36) | the same | barred (sync) |
 | `git-provenance.ts` (94–97) | provenance, the conflict hint and the uncommitted mark | barred (sync) |
+| `git-provenance.ts` `gitTracking` (249–256) | `ls-files`, whether a bound file is tracked, hardened args and env, `--literal-pathspecs` | barred. It is asynchronous but is not sandboxed: on a covered path it answers `unknown` (added after this inventory) |
 | `doc-git-modified.ts` | `log -1 --format=%cs`, a metadata field's git default | barred: `log` is not a contained subcommand, so the default is blank (added after this inventory) |
 | `component-build.ts` `gitWorkTree`, `gitIgnores` | `rev-parse --show-toplevel`, `check-ignore -q`, hardened args and env | not called for a doc under a root: its build uses the root as the boundary and reads through `tree-fs` (section A). Elsewhere, barred: a doc whose `.git` points into a lead's repository has no work tree and builds nothing. `doc-component-builds.ts` asks `gitBarred` again before reusing a cached work tree, since a root can be registered later (added after this inventory) |
 

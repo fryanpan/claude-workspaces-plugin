@@ -744,7 +744,10 @@ export function createRequestAdmission(ctx: RequestAdmissionContext): RequestAdm
       // `proxied-local` is in here too, and it is the WIDEST of the four:
       // the operator's own public hostname through the tunnel, with the
       // whole product behind it. It arrives from outside the machine by
-      // exactly the definition the other three do, and leaving it out
+      // exactly the definition the other three do. One `proxied-local`
+      // host does not come through the tunnel: the staging-only test
+      // sign-in's `signin.localhost` (`isLocalSignInHost`), which needs a
+      // loopback peer and no `cf-ray`. The switch blocks it too. Leaving it out
       // meant an operator who flipped this switch during a security
       // review — believing the one sentence that describes it — had not
       // closed the widest external door. Being the operator's own door is
