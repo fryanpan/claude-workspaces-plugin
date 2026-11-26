@@ -19,6 +19,7 @@
  */
 import type { Cdp } from '../../../scripts/headless-chrome.ts';
 import { frameSessions, frameSurface } from '../../widget/test/frame-driver-kit.ts';
+import { VOICE_ON_KEY } from '../src/lead-chat/lead-chat-mount.ts';
 import {
   ADDRESS,
   type Board,
@@ -136,31 +137,26 @@ function watchSockets(cdp: Cdp): Sockets {
 
 /**
  * Listening on the page now loaded, and a listener the server opened for it
- * since `since`. Taps the agent button only if voice did not come back by
- * itself; returns whether it had to.
+ * since `since`. Taps the agent button only if the page will not bring voice
+ * back by itself; returns whether it had to.
  */
 async function listen(board: Board, cdp: Cdp, since: number): Promise<boolean> {
   const btn = await until(
     'the agent button',
     async () => (await cdp.evaluate(BUTTON)) as { x: number; y: number } | null,
   );
-  let tapped = false;
-  // Decided on the page alone. Voice that comes back is listening on the
-  // page in the same render that shows the button; the server's listener
-  // opens later, over a socket, and on a loaded runner after 3s. Waiting on
-  // both tapped a button that was already listening, which turns voice off.
-  const back = await until(
-    'voice back by itself',
-    async () => ((await cdp.evaluate(LISTENING)) ? true : null),
-    3000,
-  ).catch(() => false);
-  if (!back) {
-    tapped = true;
-    await tap(cdp, btn);
-    await until('listening', async () => ((await cdp.evaluate(LISTENING)) ? true : null));
-  }
+  // The page brings voice back when the tab's session storage says the page
+  // before it was listening, so ask the storage, not the clock. A tap while
+  // voice is still starting turns it off: the driver used to wait 3s for
+  // voice and then tap, and on a loaded runner a resume slower than that was
+  // switched off by the tap meant to help it.
+  const kept = (await cdp.evaluate(
+    `sessionStorage.getItem(${JSON.stringify(VOICE_ON_KEY)}) === '1'`,
+  )) as boolean;
+  if (!kept) await tap(cdp, btn);
+  await until('listening', async () => ((await cdp.evaluate(LISTENING)) ? true : null));
   await until('the listener opened', () => (board.opened.length > since ? true : null));
-  return tapped;
+  return !kept;
 }
 
 /** Says `text` through the newest listener and returns what the lead heard. */

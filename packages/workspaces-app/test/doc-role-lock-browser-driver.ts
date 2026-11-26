@@ -106,8 +106,17 @@ async function until<T>(what: string, read: () => Promise<T | null>, ms = 30_000
 let browser: { proc: ChildProcess; profile: string } | undefined;
 
 /**
- * Every doc socket the page opens, recorded so the driver can type in the
- * gap between a hang-up and the reconnect. Installed before the page runs.
+ * Every editing socket the page opens for the markdown doc, recorded so the
+ * driver can type in the gap between a hang-up and the reconnect. Installed
+ * before the page runs.
+ *
+ * Only the markdown doc's socket. The page also opens the board's presence
+ * socket and the widget's socket, both under `/y`, and in no fixed order: the
+ * widget is its own script. When this logged every `/y` socket, the "latest
+ * socket" the driver watched was whichever opened last, and on a loaded CI
+ * runner that could be one still connecting when the role was cut. It then
+ * opened under the new role, nothing hung it up, and the 30s wait for the
+ * hang-up ran out.
  */
 const SOCKET_LOG = `(() => {
   const Real = window.WebSocket;
@@ -115,7 +124,7 @@ const SOCKET_LOG = `(() => {
   window.WebSocket = class extends Real {
     constructor(url, protocols) {
       super(url, protocols);
-      if (String(url).includes('/y')) window.__docSockets.push(this);
+      if (String(url).includes('/y?type=markdown')) window.__docSockets.push(this);
     }
   };
   try { localStorage.setItem('feedback-user-name', 'Alice'); } catch {}

@@ -97,6 +97,9 @@ describe('CoachHub, where his pages are', () => {
     hub.reshow(MOMENT);
     await waitFor(() => harbor.text().split('event: coach').length === 4);
     expect(harbor.text()).toBe(`:ok\n\n${ev(MOMENT)}${ev(OFF)}${ev(MOMENT)}`);
+    // Each page's stream drains on its own reader, so `harbor` holding its
+    // third frame says nothing about `front`: wait on `front`'s own.
+    await waitFor(() => front.text().split('event: coach').length === 4);
     expect(front.text()).toBe(`:ok\n\n${ev(MOMENT)}${ev(MOMENT)}${ev(MOMENT)}`);
     hub.reshow(null);
     hub.close();

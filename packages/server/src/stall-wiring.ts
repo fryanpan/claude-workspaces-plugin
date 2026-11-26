@@ -220,6 +220,8 @@ export interface StallWiringContext {
   readyNudgeIdleMs?: number;
   /** Quiet time before a row is a stall finding (ms). */
   stallNudgeQuietMs?: number;
+  /** The clock the stall pass judges quiet against. Unset → `Date.now`. */
+  stallNow?: () => number;
   /** How long a dispatched, in-progress row may go unreported before its
    *  lead is reminded to ask for a check-in, and how long that reminder
    *  silences the next one for that row (ms). */
@@ -307,6 +309,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     backTargetFor,
     reviseCallFor,
   } = ctx;
+  const stallNow = ctx.stallNow ?? Date.now;
 
   /**
    * One board as the nudger reads it: who to wake, whether to wake them at
@@ -703,7 +706,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       if (lift !== undefined) lifts.set(t.id, lift);
     }
 
-    const now = Date.now();
+    const now = stallNow();
     // Which rows have a builder whose worktree is actually being WATCHED —
     // those the gate judges on the builder-silence clock (stall-gate.ts). A
     // dispatch whose watcher failed to arm or died is deliberately left out:
@@ -1163,7 +1166,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     // finding at all: it goes to the reader as filed, on this tick, and
     // drops out of the list. This loop is where it happens because it is
     // already the one walk over every hold on both surfaces, once a minute.
-    const now = Date.now();
+    const now = stallNow();
     const held = overdueHeldItems(
       [
         // The ticket-borne holds, each carrying the call that ends it —
@@ -1212,7 +1215,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     }
     const askedBackRows = overdueAskedBack(
       askedBack,
-      Date.now(),
+      stallNow(),
       ctx.stallNudgeQuietMs ?? STALL_QUIET_DEFAULT_MS,
     );
     // A person's question on a doc that no agent has answered. Its own
@@ -1410,6 +1413,7 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
     return targets;
   };
   const stallNudger = new StallNudger({
+    now: stallNow,
     // On the timer, the cold docs the snapshot reads are read first, a slice
     // at a time, and NOT loaded: their threads are held for the snapshot and
     // the docs stay out of memory (`DocStore.peekThreads`, the only thread
@@ -1439,8 +1443,8 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       } finally {
         threadsAhead?.drop();
       }
-      keepMoving.observe(snapshots, Date.now());
-      doneWhenReady.tick(Date.now());
+      keepMoving.observe(snapshots, stallNow());
+      doneWhenReady.tick(stallNow());
       return snapshots;
     },
     // Addressed, never broadcast, and `agentsOn` rather than `count` for the

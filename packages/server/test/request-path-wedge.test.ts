@@ -30,12 +30,10 @@ import { join } from 'node:path';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { boundFiles } from '../src/slow-fs.ts';
 import { makeFifo, releaseFifosIn } from './fifo.ts';
+import { waitFor } from './wait-for.ts';
 
 const DOC_ID = 'wedged-across-every-address';
 const LEAD = { id: 'agent-cartographer', name: 'Cartographer', kind: 'agent' };
-
-/** How long an unrelated route may take while a doc read is parked. */
-const ANSWER_WITHIN_MS = 100;
 
 /** The board this file's docs, tasks and reviews are filed under. */
 let WS = '';
@@ -125,15 +123,23 @@ describe('a doc whose file never answers, reached by every request address', () 
       },
     ];
 
-    for (const { what, fire } of addresses) {
+    for (const [i, { what, fire }] of addresses.entries()) {
       const inFlight = fire();
-      // A race, not an elapsed-time assertion: what matters is that the
-      // unrelated route beats the window, not the exact millisecond count.
-      const unrelated = fetch(`${base}/api/metrics`).then((r) => `answered:${r.status}`);
-      const tooSlow = new Promise<string>((resolve) =>
-        setTimeout(() => resolve('wedged'), ANSWER_WITHIN_MS),
-      );
-      expect(`${what}: ${await Promise.race([unrelated, tooSlow])}`).toBe(`${what}: answered:200`);
+      // The first address parks the read: ask the unrelated route once it
+      // has blown the deadline and still holds its pool thread. Every later
+      // address finds the file quarantined, so there is nothing to wait for.
+      //
+      // No time budget. This was a 100ms race, and it went red on CI on
+      // 25 Nov on a loaded runner with nothing wedged. A loop held by the
+      // file never answers at all, so answering is the evidence.
+      if (i === 0) {
+        await waitFor(() => boundFiles.quarantined(boundPath), {
+          describe: `${what}: the read to be parked`,
+        });
+      }
+      const unrelated = await fetch(`${base}/api/metrics`);
+      expect(`${what}: ${unrelated.status}`).toBe(`${what}: 200`);
+      await unrelated.body?.cancel();
 
       const res = await inFlight;
       expect(res.status).toBeLessThan(500);

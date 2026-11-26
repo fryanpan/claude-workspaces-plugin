@@ -128,6 +128,8 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
   /** Messages heard while a read is out, each with the last read sent before
    *  it: that read's answer may predate the change. */
   const heard = new Map<string, { message: LeadChatMessage; afterRead: number }>();
+  /** Meeting lines heard while a read is out, for the same reason. */
+  const heardLines: Array<{ meeting: string; line: LeadChatMeetingLine; afterRead: number }> = [];
   const apply = (m: LeadChatMessage): void => {
     if (readsOut > 0) heard.set(m.id, { message: m, afterRead: readsSent });
     state = { ...state, messages: upsertLeadChatMessage(state.messages, m) };
@@ -180,13 +182,19 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
       }
       // Pages already read back stay, and so does what the oldest of them
       // said about anything before it.
+      let meeting = read.meeting ?? null;
+      for (const { meeting: id, line, afterRead } of heardLines) {
+        if (afterRead >= sent && meeting?.id === id) {
+          meeting = { ...meeting, lines: upsertMeetingLine(meeting.lines, line) };
+        }
+      }
       const first = read.messages[0];
       const held = messages[0];
       const keepsOlder = !!first && !!held && compareLeadChatEntries(held, first) < 0;
       state = {
         ...read,
         messages,
-        meeting: read.meeting ?? null,
+        meeting,
         loaded: true,
         more: keepsOlder ? state.more : read.more === true,
         loadingOlder: state.loadingOlder,
@@ -195,7 +203,10 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
     } catch {
       // Offline: the next reconnect reads again.
     } finally {
-      if (--readsOut === 0) heard.clear();
+      if (--readsOut === 0) {
+        heard.clear();
+        heardLines.length = 0;
+      }
     }
   };
 
@@ -229,7 +240,13 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
     try {
       const frame = JSON.parse((ev as MessageEvent).data) as LeadChatMeetingLineFrame;
       const m = state.meeting;
-      if (frame.workspaceId !== opts.workspaceId || !m || m.id !== frame.meeting) return;
+      if (frame.workspaceId !== opts.workspaceId) return;
+      // Kept even when this page holds no meeting yet: the read still out may
+      // be the one that brings it, without this line.
+      if (readsOut > 0) {
+        heardLines.push({ meeting: frame.meeting, line: frame.line, afterRead: readsSent });
+      }
+      if (!m || m.id !== frame.meeting) return;
       state = { ...state, meeting: { ...m, lines: upsertMeetingLine(m.lines, frame.line) } };
       changed();
       if (frame.line.lead) for (const fn of leadLines) fn(m.id, frame.line);

@@ -1287,6 +1287,7 @@ export function createServer(opts: ServerOptions = {}): ServerHandle {
     externalBaseUrl: () => externalBaseUrl(),
     ...(opts.readyNudgeIdleMs !== undefined ? { readyNudgeIdleMs: opts.readyNudgeIdleMs } : {}),
     ...(opts.stallNudgeQuietMs !== undefined ? { stallNudgeQuietMs: opts.stallNudgeQuietMs } : {}),
+    ...(opts.stallNow !== undefined ? { stallNow: opts.stallNow } : {}),
     ...(opts.checkInMs !== undefined ? { checkInMs: opts.checkInMs } : {}),
     ...(opts.stallBuilderSilentMultiplier !== undefined
       ? { stallBuilderSilentMultiplier: opts.stallBuilderSilentMultiplier }

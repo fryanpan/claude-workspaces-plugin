@@ -48,6 +48,8 @@ describe("a linked doc's discussion counts too", () => {
   let handle: ServerHandle;
   let dataDir: string;
   let base: string;
+  /** The stall pass's clock. Real time unless a case freezes it. */
+  let stallClock: () => number = Date.now;
 
   const post = (path: string, body: unknown): Promise<Response> =>
     fetch(`${base}${path}`, {
@@ -65,7 +67,13 @@ describe("a linked doc's discussion counts too", () => {
 
   beforeEach(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'doc-threads-stall-'));
-    handle = createServer({ port: 0, dataDir, stallNudgeQuietMs: QUIET_MS });
+    stallClock = Date.now;
+    handle = createServer({
+      port: 0,
+      dataDir,
+      stallNudgeQuietMs: QUIET_MS,
+      stallNow: () => stallClock(),
+    });
     base = `http://127.0.0.1:${handle.port}`;
     const alice = signedInPerson(handle, dataDir, base, {
       email: 'alice@harborlight.example',
@@ -253,6 +261,12 @@ describe("a linked doc's discussion counts too", () => {
     // Out-quiet the window FIRST, so only the reply can save the row — and so
     // the untouched second row proves the pass still fires.
     await settle(2 * QUIET_MS + 50);
+    // The pass is judged at the instant the reply was posted. On real time,
+    // a runner pause longer than QUIET_MS between the reply and the pass
+    // made the reply stale too, and the busy row was named beside the quiet
+    // one (CI, 25 Nov).
+    const repliedAt = Date.now();
+    stallClock = () => repliedAt;
     await jj(
       await post(`/workspaces/${WS}/docs/${encodeURIComponent(docId)}/threads`, {
         text: 'Second pass is up; the spacing question is closed.',

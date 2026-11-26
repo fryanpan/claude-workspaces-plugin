@@ -13,23 +13,7 @@ import {
 import { describe, expect, it } from 'vitest';
 import { createLeadChatClient } from '../src/lead-chat/lead-chat-client.ts';
 
-class FakeStream {
-  listeners = new Map<string, Array<(ev: MessageEvent) => void>>();
-  closed = false;
-  /** CONNECTING, as a stream opened for this client is. */
-  readyState = 0;
-  constructor(readonly url: string) {}
-  addEventListener(type: string, fn: (ev: MessageEvent) => void) {
-    this.listeners.set(type, [...(this.listeners.get(type) ?? []), fn]);
-  }
-  close() {
-    this.closed = true;
-  }
-  fire(type: string, data?: unknown) {
-    const ev = new MessageEvent(type, data === undefined ? {} : { data: JSON.stringify(data) });
-    for (const fn of this.listeners.get(type) ?? []) fn(ev);
-  }
-}
+import { FakeStream, settle } from './lead-chat-fake-stream.ts';
 
 const msg = (id: string, text: string, ts: number, extra: Partial<LeadChatMessage> = {}) =>
   ({
@@ -68,8 +52,6 @@ function setup(reads: unknown[]) {
   });
   return { client, calls, stream: () => stream as unknown as FakeStream };
 }
-
-const settle = () => new Promise((r) => setTimeout(r, 0));
 
 describe('the lead chat client', () => {
   it('reads the board conversation and listens on the board stream', async () => {
