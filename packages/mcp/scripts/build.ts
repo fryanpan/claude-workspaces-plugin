@@ -1,24 +1,20 @@
 #!/usr/bin/env bun
 /**
- * Bundle packages/mcp/src/mcp.ts into a self-contained `mcp.js` that
- * can run under plain Node. Dependencies (@modelcontextprotocol/sdk)
- * are bundled in; runtime has zero external node_modules after install.
+ * Build the MCP children.
  *
- * Two output locations:
+ *   packages/mcp/dist/mcp.js        — the full stdio child, bundled from
+ *                                     src/mcp.ts: the `bin` target of the
+ *                                     npm package (`claude-workspaces-mcp`).
+ *                                     Gitignored.
  *
- *   packages/mcp/dist/mcp.js           — canonical build artifact, the
- *                                        `bin` target of the published
- *                                        npm package (`claude-workspaces-mcp`).
+ *   packages/plugin/mcp/relay.js    — the node relay, committed into the
+ *                                     plugin tree; `.mcp.json` runs it
+ *                                     through bin/claude-workspaces-mcp.sh.
  *
- *   packages/plugin/mcp/index.js       — vendored copy bundled INTO the
- *                                        plugin tree so `.mcp.json` can
- *                                        invoke it via a relative path
- *                                        without depending on a global
- *                                        symlink. Solves #52: no more
- *                                        `npm link` step in the install
- *                                        path, no more "Failed to
- *                                        reconnect" after `bun install`
- *                                        wipes the symlink.
+ * The plugin no longer ships the full child. It used to be written to
+ * packages/plugin/mcp/index.js as the rollback behind CW_MCP_RELAY=0; its
+ * last release is the git tag mcp-full-child-rollback. Sessions reach the
+ * same tool code through the server's hosted connector at /mcp.
  *
  * Usage:  bun run packages/mcp/scripts/build.ts
  */
@@ -32,10 +28,10 @@ const repoRoot = join(pkgRoot, '..', '..');
 const srcEntry = join(pkgRoot, 'src', 'mcp.ts');
 
 const distOutFile = join(pkgRoot, 'dist', 'mcp.js');
-const pluginOutFile = join(repoRoot, 'packages', 'plugin', 'mcp', 'index.js');
+const relayFile = join(repoRoot, 'packages', 'plugin', 'mcp', 'relay.js');
 
 mkdirSync(dirname(distOutFile), { recursive: true });
-mkdirSync(dirname(pluginOutFile), { recursive: true });
+mkdirSync(dirname(relayFile), { recursive: true });
 
 const result = await Bun.build({
   entrypoints: [srcEntry],
@@ -56,11 +52,9 @@ const code = await out.text();
 // source-comment). Needed so the file can be exec'd directly.
 const finalCode = `#!/usr/bin/env node\n${code.replace(/^#!.*\n/, '')}`;
 
-for (const target of [distOutFile, pluginOutFile]) {
-  await Bun.write(target, finalCode);
-  chmodSync(target, 0o755);
-  console.log(`[mcp] built → ${target}`);
-}
+await Bun.write(distOutFile, finalCode);
+chmodSync(distOutFile, 0o755);
+console.log(`[mcp] built → ${distOutFile}`);
 
 // The node relay (src/relay/): the child the launcher runs when the compiled
 // relay is not built yet or cannot be. A bundle of its own, so a relay
@@ -76,7 +70,6 @@ if (!relayResult.success || !relayOut) {
   console.error(relayResult.logs.join('\n'));
   throw new Error('relay build failed');
 }
-const relayFile = join(repoRoot, 'packages', 'plugin', 'mcp', 'relay.js');
 await Bun.write(
   relayFile,
   `#!/usr/bin/env node\n${(await relayOut.text()).replace(/^#!.*\n/, '')}`,

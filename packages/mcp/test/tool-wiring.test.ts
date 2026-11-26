@@ -13,9 +13,8 @@
  * compare them. That is a proxy for the thing: it cannot see a dispatch arm
  * the formatter re-indented out of its `{4,6}` window, it counts a `case`
  * inside an unrelated switch as a tool, and — the failure that matters most
- * here — it says nothing at all about `packages/plugin/mcp/index.js`, which
- * is the artifact `.mcp.json` loads and a peer runs. A tool wired in the
- * source and never rebuilt reaches nobody, and the old form was green for it.
+ * here — it says nothing at all about what the running child declares, and
+ * the old form was green for a tool that reached nobody.
  *
  * So: boot the committed bundle over stdio, take the advertised list from
  * `tools/list`, and CALL each name. "Has a handler" stops being a regex match

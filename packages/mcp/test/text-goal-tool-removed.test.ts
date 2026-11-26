@@ -2,9 +2,9 @@
  * `set_workspace_goal` is gone from the tool surface peers actually load.
  *
  * The workspace-level TEXT goal was removed; a board's goals are the ordered
- * goal LIST. Source alone is not the deliverable here: peers run the committed
- * `packages/plugin/mcp/index.js`, and a tool that survives only in the bundle
- * is a tool agents keep calling — against a route that now refuses it.
+ * goal LIST. Source alone is not the deliverable here: a tool the running
+ * child still declares is a tool agents keep calling — against a route that
+ * now refuses it.
  *
  * This was a text search over `mcp.ts` and the built file for the absent
  * string. What the removal is FOR is that no session can reach the verb, and a

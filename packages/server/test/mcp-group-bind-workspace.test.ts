@@ -1,12 +1,11 @@
 /**
  * create_diff_review / bind_folder file their review on a board — through the
- * SHIPPED BUNDLE.
+ * full MCP child.
  *
  * A param can be declared in a tool's inputSchema and never put on the wire.
  * That is exactly how `groups` was accepted and discarded, and a unit test on
- * either side of that gap passes the whole time — so this spawns
- * `packages/plugin/mcp/index.js` (the artifact peers actually load, not the
- * TypeScript source) over stdio and asserts the server-side EFFECT.
+ * either side of that gap passes the whole time — so this spawns the full
+ * MCP child over stdio and asserts the server-side EFFECT.
  *
  * All fixtures are synthetic. The repo is public.
  */
@@ -17,7 +16,8 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { type ServerHandle, createServer } from '../src/server.ts';
 
-const BUNDLE = resolve(import.meta.dir, '../../plugin/mcp/index.js');
+/** The full stdio child, run from source by this bun (its bundle is no longer shipped). */
+const MCP_SOURCE = resolve(import.meta.dir, '../../mcp/src/mcp.ts');
 
 function git(repo: string, ...args: string[]): string {
   return execFileSync('git', ['-C', repo, ...args], {
@@ -92,7 +92,7 @@ describe('the group-bind MCP tools file the review on a board, through the real 
 
     handle = createServer({ port: 0, dataDir });
 
-    child = spawn('node', [BUNDLE], {
+    child = spawn(process.execPath, [MCP_SOURCE], {
       env: {
         ...process.env,
         // The MCP prefers this over port discovery, so the child talks to THIS

@@ -289,7 +289,7 @@ describe('the secret is never said', () => {
 describe('the launcher under Access', () => {
   const REPO = resolve(__dirname, '../../..');
   const LAUNCHER = resolve(REPO, 'packages/plugin/bin/claude-workspaces-mcp.sh');
-  const BUNDLE = resolve(REPO, 'packages/plugin/mcp/index.js');
+  const RELAY = resolve(REPO, 'packages/plugin/mcp/relay.js');
 
   // A stand-in compiler whose output passes --self-test, so the compiled arm
   // is reachable without swiftc. /sbin/md5 keys the cache, so macOS only.
@@ -304,7 +304,7 @@ describe('the launcher under Access', () => {
       );
       chmodSync(fakeSwiftc, 0o755);
       const choice = (extra: Record<string, string>) =>
-        spawnSync('/bin/sh', [LAUNCHER, BUNDLE], {
+        spawnSync('/bin/sh', [LAUNCHER, RELAY], {
           env: {
             PATH: `${process.env.PATH ?? ''}`,
             HOME: dir,

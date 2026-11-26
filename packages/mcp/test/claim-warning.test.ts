@@ -185,8 +185,8 @@ describe('the queue tells an agent who is already on a row', () => {
 });
 
 /**
- * Peers load `packages/plugin/mcp/index.js`, so a source-only change reaches
- * nobody — and this is the half that says the shipped artifact does the work.
+ * This half drives the full child over its stdio, so it says the running
+ * child does the work, not that a string survives in its source.
  *
  * It is also, since the source-shape sweep, the ONLY half. The wiring claims
  * that used to be made by slicing `case 'task_transition': {` out of the

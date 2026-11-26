@@ -7,11 +7,10 @@
  * HAS review items (0..n, several possibly open at once), each carrying its
  * own blurb above its own options. These are the tools that reach it.
  *
- * Driven through the COMMITTED BUNDLE rather than the source, because that is
- * the artifact `.mcp.json` loads and a peer runs: a tool wired in `mcp.ts` and
- * never rebuilt reaches nobody. The bundle is spawned against a stub HTTP
- * server, so what these assert is the thing nothing else checks — which route
- * a tool call actually lands on, and what it carries.
+ * Driven over the MCP wire: the full child is spawned from its source
+ * (`harness/full-child.ts`) against a stub HTTP server, so what these assert is
+ * the thing nothing else checks — which route a tool call actually lands on,
+ * and what it carries.
  *
  * The two POSITIVE CONTROLS are the point of the file as much as the new
  * cases are. `answer_decision` sent the exact shape an old caller sends, and
@@ -29,9 +28,9 @@ import { fileURLToPath } from 'node:url';
 import { threadReviewItemId } from '@claude-workspaces/core/review-item-id';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { isBackgroundRequest } from './harness/background-requests.ts';
+import { BUN_BIN, MCP_SOURCE } from './harness/full-child.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const BUNDLE = join(HERE, '../../plugin/mcp/index.js');
 
 type Recorded = { method: string; path: string; body: Record<string, unknown> };
 
@@ -192,7 +191,7 @@ beforeAll(async () => {
   const port = (stub.address() as AddressInfo).port;
   stubBase = `http://127.0.0.1:${port}`;
 
-  child = spawn(process.execPath, [BUNDLE], {
+  child = spawn(BUN_BIN, [MCP_SOURCE], {
     env: {
       ...process.env,
       CW_BASE_URL: `http://127.0.0.1:${port}`,
