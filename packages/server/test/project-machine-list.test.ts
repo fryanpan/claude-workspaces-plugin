@@ -9,6 +9,7 @@ import { readFileSync } from 'node:fs';
 import {
   MACHINES_FILE,
   deployArgs,
+  listedArgs,
   matrixLine,
   parseMachines,
   provisionFlags,
@@ -127,5 +128,77 @@ describe('the flags fly-provision.yml passes through', () => {
   it('refuses any other flag', () => {
     expect(() => provisionFlags(['--', '--lead-board', 'w-x'])).toThrow('not a provisioning flag');
     expect(() => provisionFlags(['--', ''])).toThrow('an empty argument');
+  });
+});
+
+describe('a hand run of machine:deploy for a listed project', () => {
+  const machines = parseMachines(
+    list([
+      { project: 'riverbend', memory: 512, seedBoard: 'Riverbend sign-in check' },
+      { project: 'saltmarsh', leadBoard: 'w-salt', pushRepos: ['alice/salt', 'alice/marsh'] },
+    ]),
+  );
+
+  it('takes the flags it left out from the entry', () => {
+    const { args, added } = listedArgs(
+      ['--project', 'riverbend', '--ref', 'origin/main'],
+      machines,
+    );
+    expect(args).toEqual([
+      '--project',
+      'riverbend',
+      '--ref',
+      'origin/main',
+      '--tunnel',
+      'named',
+      '--memory',
+      '512',
+      '--seed-board',
+      'Riverbend sign-in check',
+    ]);
+    expect(added).toEqual([
+      '--tunnel named',
+      '--memory 512',
+      '--seed-board Riverbend sign-in check',
+    ]);
+    expect(listedArgs(['--project', 'saltmarsh'], machines).added).toEqual([
+      '--tunnel named',
+      '--lead-board w-salt',
+      '--push-repo alice/salt',
+      '--push-repo alice/marsh',
+    ]);
+  });
+
+  it('matches what machines.ts deploy passes, so that run is unchanged', () => {
+    for (const m of machines) {
+      const full = deployArgs(m, 'abc123', true);
+      expect(listedArgs(full, machines)).toEqual({ args: full, added: [] });
+    }
+  });
+
+  it('refuses a flag that differs from the entry, naming machines.ts deploy', () => {
+    const run =
+      (...extra: string[]) =>
+      () =>
+        listedArgs(['--project', 'riverbend', ...extra], machines);
+    expect(run('--tunnel', 'quick')).toThrow(
+      'machines.json lists riverbend with --tunnel named: change machines.json, or run machines.ts deploy --project riverbend',
+    );
+    expect(run('--seed-board', 'Harborlight')).toThrow('--seed-board Riverbend sign-in check');
+    expect(run('--lead-board', 'w-river')).toThrow('with no --lead-board');
+    expect(() =>
+      listedArgs(['--project', 'saltmarsh', '--push-repo', 'alice/salt'], machines),
+    ).toThrow('--push-repo alice/salt --push-repo alice/marsh');
+    expect(() =>
+      listedArgs(
+        ['--project', 'saltmarsh', '--push-repo', 'alice/salt', '--push-repo', 'alice/salt'],
+        machines,
+      ),
+    ).toThrow('--push-repo alice/salt --push-repo alice/marsh');
+  });
+
+  it('leaves an unlisted project as it was', () => {
+    const args = ['--project', 'harborlight', '--tunnel', 'quick'];
+    expect(listedArgs(args, machines)).toEqual({ args, added: [] });
   });
 });

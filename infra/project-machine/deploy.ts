@@ -10,6 +10,10 @@
  *       [--push-repo <owner/name>]... [--refresh-push-keys]
  *       [--refresh-tunnel-token] [--tf-env prod|staging] [--no-terraform-outputs]
  *
+ * A project machines.json lists takes that entry's tunnel, memory, lead
+ * board, push repos and seed board (`listedArgs`): a flag left out is
+ * filled in, and one that differs is refused.
+ *
  * Each run reads what exists and does only what is missing, so a second run
  * over a finished project changes nothing:
  *
@@ -120,7 +124,7 @@ import {
   secretsFromEnv,
 } from './mac-ops.ts';
 import { macOutputs } from './mac-outputs.ts';
-import { type Machine, readMachines } from './machines.ts';
+import { type Machine, listedArgs, readMachines } from './machines.ts';
 import { type ApprovalIo, approveOrgSignIn } from './org-signin.ts';
 import { flushMacHandoff, provisionPresets } from './provision.ts';
 import { makePushKeys } from './push-keys.ts';
@@ -628,7 +632,11 @@ export async function tunnelAddress(app: string): Promise<string | null> {
 }
 
 async function main(): Promise<void> {
-  const args = process.argv.slice(2);
+  // A listed project deploys with its machines.json entry, whoever runs it.
+  const listed = listedArgs(process.argv.slice(2), readMachines());
+  const args = listed.args;
+  if (listed.added.length > 0)
+    console.log(`[deploy] from machines.json: ${listed.added.join(', ')}`);
   const project = arg(args, 'project');
   if (!project) {
     console.error('[deploy] --project <name> is required');
