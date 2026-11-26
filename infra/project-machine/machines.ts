@@ -236,7 +236,11 @@ export function listedArgs(
       out.push('--push-repo', r);
       added.push(`--push-repo ${r}`);
     }
-  } else if (given.length !== want.length || !given.every((r) => want.includes(r))) {
+  } else if (
+    new Set(given).size !== given.length ||
+    given.length !== want.length ||
+    !given.every((r) => want.includes(r))
+  ) {
     refuse(want.length > 0 ? `--push-repo ${want.join(' --push-repo ')}` : 'no --push-repo');
   }
   return { args: out, added };

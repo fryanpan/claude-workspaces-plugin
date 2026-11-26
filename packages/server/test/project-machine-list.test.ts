@@ -189,6 +189,12 @@ describe('a hand run of machine:deploy for a listed project', () => {
     expect(() =>
       listedArgs(['--project', 'saltmarsh', '--push-repo', 'alice/salt'], machines),
     ).toThrow('--push-repo alice/salt --push-repo alice/marsh');
+    expect(() =>
+      listedArgs(
+        ['--project', 'saltmarsh', '--push-repo', 'alice/salt', '--push-repo', 'alice/salt'],
+        machines,
+      ),
+    ).toThrow('--push-repo alice/salt --push-repo alice/marsh');
   });
 
   it('leaves an unlisted project as it was', () => {

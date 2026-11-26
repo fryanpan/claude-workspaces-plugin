@@ -332,6 +332,10 @@ bun run machine:deploy --project <project> --memory 2048 \
   [--github-deploy-key <keychain entry> --lead-repo <owner/name>]
 ```
 
+For a project `machines.json` lists, put the memory and lead board in its
+entry instead (`memory`, `leadBoard`): a hand run refuses flags the entry
+does not set.
+
 - `--lead-board` sets `CW_LEAD_BOARD`. Without a board no lead runs, and the
   deploy sends no sign-in, though the Mac's Keychain holds one.
 - The sign-in is `CLAUDE_CODE_OAUTH_TOKEN`. A deploy takes it from the central
