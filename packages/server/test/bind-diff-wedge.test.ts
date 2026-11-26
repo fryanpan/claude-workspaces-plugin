@@ -26,19 +26,8 @@ import { join } from 'node:path';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { boundFiles } from '../src/slow-fs.ts';
 import { makeFifo, releaseFifosIn } from './fifo.ts';
+import { waitFor } from './wait-for.ts';
 import { seedBoard } from './workspace-seed.ts';
-
-/**
- * The budget an unrelated route has while the bind is parked on a file that
- * will not answer.
- *
- * The supervisor's liveness check is a TCP bind probe rather than an HTTP
- * route, so what this is really asking is whether the event loop is still
- * running. `GET /api/docs` reads the index and hydrates nothing, so the only
- * thing that can delay it is a blocked loop — and 100ms is two orders of
- * magnitude under the read deadline the bind is waiting out.
- */
-const HEALTH_MS = 100;
 
 function git(repo: string, args: string[]): void {
   execFileSync('git', ['-C', repo, ...args], { stdio: 'pipe' });
@@ -90,24 +79,10 @@ describe('binding a diff over a tree that has stopped answering', () => {
     rmSync(repo, { recursive: true, force: true });
   });
 
-  /** An unrelated route answers within its budget; never rejects. */
-  function healthAnswers(base: string): Promise<string> {
-    const probe = fetch(`${base}/workspaces/${WS}/docs`).then((r) => `answered:${r.status}`);
-    const tooSlow = new Promise<string>((resolve) =>
-      setTimeout(() => resolve('wedged'), HEALTH_MS),
-    );
-    return Promise.race([probe, tooSlow]);
-  }
-
   it('parks the file that will not answer and leaves the server answering', async () => {
     handle = createServer({ port: 0, dataDir, requireSignInToWrite: false });
     const base = `http://127.0.0.1:${handle.port}`;
     WS = await seedBoard(base);
-    // Warm the route first. The very first request to a fresh server pays for
-    // module loading and route compilation, and a budget this tight would
-    // otherwise be measuring that rather than the event loop.
-    expect((await fetch(`${base}/workspaces/${WS}/docs`)).status).toBe(200);
-
     // Caught, not bare: if the assertion below fails, `afterEach` stops the
     // server while this is still in flight, and a bare rejection would be
     // reported against whichever test runs next.
@@ -117,10 +92,19 @@ describe('binding a diff over a tree that has stopped answering', () => {
       body: JSON.stringify({ repo, base: 'HEAD' }),
     }).catch((err: unknown) => err as Error);
 
-    // The assertion the incident is about. Nothing in this request touches the
-    // review; if the bind is holding the only thread that runs JavaScript, it
-    // cannot be served at all.
-    expect(await healthAnswers(base)).toBe('answered:200');
+    // The assertion the incident is about, asked while the read is parked:
+    // the file blew the deadline and is quarantined, and its read still holds
+    // a pool thread (nothing ever opens the pipe's other end). Nothing in this
+    // request touches the review. A bind holding the only thread that runs
+    // JavaScript could not serve it at all — nor could this process poll.
+    //
+    // No time budget. This was a 100ms race against an unrelated route, and
+    // it went red on CI twice on 25 Nov while the bind was doing what it
+    // should: a loaded runner's slow stats (`[file-poll] ... 9 other slow
+    // stats`) alone took longer than that. A wedged loop never answers, so
+    // answering at all is the evidence.
+    await waitFor(() => boundFiles.quarantined(wedged), { describe: 'the read to be parked' });
+    expect((await fetch(`${base}/workspaces/${WS}/docs`)).status).toBe(200);
 
     const res = await bind;
     if (res instanceof Error) throw res;
