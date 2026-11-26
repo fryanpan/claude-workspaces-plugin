@@ -239,6 +239,11 @@ export interface AuthShareRoutesContext {
   policyFor: (req: Request) => OriginPolicy;
   /** The identity a request's session cookie attests to, or null. */
   sessionIdentityFor: (req: Request) => IdentityRecord | null;
+  /**
+   * The sign-in page that runs Google again, when this request's proof is a
+   * board sign-in session (`auth/board-signin.ts`); null otherwise.
+   */
+  signInAgainPath?: (req: Request, next: string) => Promise<string | null>;
   /** Each person's lead agent (`person-agent-link.ts`). */
   personAgentLinks: PersonAgentLinks;
   /** Tells every open page a person's new name (`yjs-protocol.ts`). */
@@ -301,6 +306,7 @@ export async function handleAuthShareRoutes(
     isSecureRequest,
     policyFor,
     sessionIdentityFor,
+    signInAgainPath,
   } = ctx;
   const {
     req,
@@ -588,14 +594,22 @@ export async function handleAuthShareRoutes(
   // (fresh-signin.ts). The page navigates here and comes back to `next`
   // having signed in afresh. An Access person loses this host's Access
   // token, so the edge sends them through Access, which mints a new one with
-  // a new `iat`; a person on the board's own sign-in goes to `/signin`, whose
-  // login mints a session with a new `signedInAt`. It ends no session and
+  // a new `iat`; a person signed in with Google here goes back through the
+  // sign-in page, which mints a new session; a person on the email-code
+  // sign-in goes to `/signin`, whose login mints a session with a new
+  // `signedInAt`. It ends no session and
   // grants nothing: the worst a page that links here can do is make its
   // visitor sign in again.
   if (pathname === '/api/auth/reauth' && req.method === 'GET') {
     const next = sameOriginPath(rq.url.searchParams.get('next'));
     const headers = new Headers({ 'cache-control': 'no-store' });
-    if (accessIdentityFor() !== null) {
+    // A Google sign-in proves the person the same way Access does, but
+    // clearing Access's cookie repeats nothing for it: it has to go through
+    // the sign-in page again, or it comes back exactly as old as it left.
+    const again = (await signInAgainPath?.(req, next)) ?? null;
+    if (again !== null) {
+      headers.set('location', again);
+    } else if (accessIdentityFor() !== null) {
       headers.set('location', next);
       headers.append(
         'set-cookie',

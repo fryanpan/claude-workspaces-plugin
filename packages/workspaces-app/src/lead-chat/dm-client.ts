@@ -86,6 +86,7 @@ export function createDmClient(opts: DmClientOpts): DmClient {
   let ready = false;
   const messages = new Map<DmChannelId, LeadChatMessage[]>();
   const loaded = new Set<DmChannelId>();
+  const reading = new Map<DmChannelId, Promise<void>>();
   const unread = new Set<DmChannelId>();
   const listeners: Array<(s: DmState) => void> = [];
   let watching: (id: DmChannelId) => boolean = () => false;
@@ -230,7 +231,11 @@ export function createDmClient(opts: DmClientOpts): DmClient {
       listeners.push(fn);
     },
     async show(id) {
-      if (!loaded.has(id)) await read(id);
+      if (loaded.has(id)) return;
+      // A show asked while the same read is in flight shares it.
+      const inFlight = reading.get(id) ?? read(id).finally(() => reading.delete(id));
+      reading.set(id, inFlight);
+      await inFlight;
     },
     async send(id, text) {
       const ch = channels.find((c) => c.id === id);

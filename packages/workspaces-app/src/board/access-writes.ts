@@ -12,6 +12,7 @@ import {
   resumeHeld,
   sendCounted,
 } from '../fresh-signin-client.ts';
+import { type AccessRole, levelLabel } from './board-member-level.ts';
 
 /** What the access writes read back: the page's `send` reply, filled in. */
 export interface AccessReply {
@@ -36,6 +37,20 @@ export function letInRequest(workspaceId: string, match: string): CountedRequest
     gerund: 'Letting someone in',
     noun: 'access change',
     name: match,
+  };
+}
+
+/** Changing what one person, or everyone at a `@domain`, may do. */
+export function roleRequest(workspaceId: string, match: string, role: string): CountedRequest {
+  return {
+    method: 'POST',
+    url: `/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(match)}/role`,
+    body: { role },
+    verb: 'Change',
+    gerund: 'Changing what someone can do',
+    noun: 'access change',
+    // The level it is for, so the card it comes back to says what it does.
+    name: `${match.startsWith('@') ? `everyone at ${match}` : match} to ${levelLabel(role as AccessRole)}`,
   };
 }
 
@@ -101,6 +116,7 @@ export async function resumeAccessWrite(
   const said = reply.data?.message;
   if (!reply.ok) toast(typeof said === 'string' ? said : `Could not finish: ${request.name}`);
   else if (request.verb === 'Approve') toast(`Approved. ${request.name}`);
+  else if (request.verb === 'Change') toast(`Changed ${request.name}`);
   else toast(`${request.name} can now sign in`);
   return true;
 }

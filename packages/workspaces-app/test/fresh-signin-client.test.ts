@@ -89,6 +89,10 @@ describe('sendCounted', () => {
       expect(card()).toEqual({ title: "Confirm it's you", buttons: ['Cancel', 'Sign in again'] }),
     );
     expect(document.querySelector('.fresh-signin-prompt b')?.textContent).toBe(ARCHIVE.name);
+    // The name sits mid-sentence, so one that starts in lower case reads right.
+    expect(document.querySelector('.fresh-signin-prompt b')?.parentElement?.textContent).toMatch(
+      new RegExp(`, so ${ARCHIVE.name} waits until you sign in again\\.$`),
+    );
     await answer("Confirm it's you", 'Cancel');
     expect(await pending).toBeNull();
     expect(toast).toHaveBeenCalledWith('Nothing changed');
@@ -289,18 +293,24 @@ describe('resumeHeld', () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it('asks again if the sign-in it came back from is still refused', async () => {
+  // The page cannot see the sign-in, only the server's answer. A refusal
+  // after coming back means the sign-in was not renewed: asking again sent
+  // the person round the same loop forever.
+  it('stops, and says the sign-in was not renewed, if the action is still refused', async () => {
     const storage = memoryStorage();
     holdFor(storage, PAGE, 1_000);
-    const pending = resumeHeld({
-      toast: vi.fn(),
-      fetchImpl: async () => refused(),
-      storage,
-      here: () => PAGE,
-      now: () => 2_000,
-    });
+    const toast = vi.fn();
+    const fetchImpl = vi.fn(async () => refused());
+    const pending = resumeHeld({ toast, fetchImpl, storage, here: () => PAGE, now: () => 2_000 });
+    await vi.waitFor(() => expect(card()?.title).toBe('Archive Riverbend launch notes now?'));
+    // It claims nothing about the sign-in the page cannot see.
+    expect(document.querySelector('.fresh-signin-prompt p')?.textContent).not.toMatch(
+      /signed in again/i,
+    );
     await answer('Archive Riverbend launch notes now?', 'Archive');
-    await answer("Confirm it's you", 'Cancel');
     expect(await pending).toBeNull();
+    expect(card()).toBeNull();
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(toast).toHaveBeenCalledWith('Your sign-in was not renewed, so nothing changed');
   });
 });

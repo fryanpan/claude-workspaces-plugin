@@ -12,7 +12,8 @@
  * THREE ROUTES, one of them everybody's:
  *
  *   GET    /workspaces/<id>/members              the list, plus YOUR own role
- *   POST   /workspaces/<id>/members/<email>/role owner, edit, comment or view (owner)
+ *   POST   /workspaces/<id>/members/<email>/role owner, edit, comment or view (owner);
+ *                                                an `@domain` takes edit, comment or view
  *   DELETE /workspaces/<id>/members/<email>      end their access    (owner)
  *   POST   /workspaces/<id>/roles-mode           report-only or enforce (owner)
  *   POST   /workspaces/<id>/collab-core          the collab core on or off, for this
@@ -49,12 +50,7 @@ import { collabCoreView } from '../collab-core-switch.ts';
 import { matchRest } from '../middleware/workspace-scope.ts';
 import { proposalReply, proposingAgent } from '../share/access-proposals.ts';
 import { accessPeople } from '../share/access-view.ts';
-import {
-  parseAccessRole,
-  parseRolesMode,
-  seatAndAccess,
-  widensAccess,
-} from '../share/board-access.ts';
+import { parseAccessRole, parseRolesMode, seatAndAccess } from '../share/board-access.ts';
 import { hasOwnerProof } from '../share/owner-proof.ts';
 import { parseShareAudience } from '../share/share-audience.ts';
 import { shareMemberKey } from '../share/share-links.ts';
@@ -160,10 +156,41 @@ export async function handleWorkspaceMembers(
     if (!accessRole) {
       return j(400, { error: "role must be 'owner', 'edit', 'comment' or 'view'" });
     }
+    // Read-only: an address nobody has signed in with holds no row yet, and
+    // this must not write one (`ShareLinks.heldAccessOf`).
+    const held = email.startsWith('@') ? null : shareLinks.heldAccessOf(workspaceId, email);
+    const before = held?.seat ?? null;
+    // An audience entry with no member row: an `@domain` (one level for
+    // everyone it lets in), or an address nobody has signed in with yet (the
+    // level they arrive at). Neither is a seat, so neither can be Owner.
+    if (before === null) {
+      const levelBefore = shareLinks.audienceAccessOf(workspaceId, email);
+      if (levelBefore === null) {
+        return j(404, {
+          error: email.startsWith('@') ? 'not on this board' : 'not a member',
+          workspaceId,
+        });
+      }
+      if (accessRole === 'owner') {
+        return j(400, { error: "an entry's level is 'edit', 'comment' or 'view'" });
+      }
+      if (shareLinks.raisesAccess(workspaceId, email, accessRole)) {
+        const unproven = refuseUnproven('widens what an entry lets people do');
+        if (unproven) return unproven;
+      }
+      // Without the proof the store raises nobody, even on a change that
+      // reads as a narrowing of the entry itself.
+      const moved =
+        shareLinks.setAudienceAccess(
+          workspaceId,
+          email,
+          accessRole,
+          proven() ? { mayWiden: true } : {},
+        ) ?? [];
+      return j(200, { ok: true, workspaceId, match: email, accessRole, ...hangUp(moved) });
+    }
     const { seat: role, access } = seatAndAccess(accessRole);
-    const before = shareLinks.roleOf(workspaceId, email);
-    const accessBefore = shareLinks.accessRoleOf(workspaceId, email);
-    if (before === null) return j(404, { error: 'not a member', workspaceId });
+    const accessBefore = held?.access ?? null;
     // A promotion by anything but the owner's own browser is a proposal.
     if (role === 'owner' && before !== 'owner' && !proven()) {
       const change = {
@@ -180,7 +207,7 @@ export async function handleWorkspaceMembers(
       );
     }
     // View to comment, or either to edit, lets them do more: the owner's own.
-    if (accessBefore !== null && widensAccess(accessBefore, accessRole)) {
+    if (shareLinks.raisesAccess(workspaceId, email, accessRole)) {
       const unproven = refuseUnproven('widens what a member may do');
       if (unproven) return unproven;
     }

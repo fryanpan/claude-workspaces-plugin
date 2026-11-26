@@ -1,4 +1,5 @@
 import type { User } from '@claude-workspaces/core';
+import { api } from '../doc-path.ts';
 /**
  * The five writes a comment card can make, and what the reader is told when
  * one fails.
@@ -17,7 +18,7 @@ import type { User } from '@claude-workspaces/core';
  * showing the outcome and a "try again" over an already-done undo reads as a
  * broken button.
  */
-import { api } from '../doc-path.ts';
+import { type Refused, refusalOf } from '../not-sent.ts';
 import { type ChromeSelection, anchorBody } from './anchor-body.ts';
 import { showToast } from './chrome-dom.ts';
 
@@ -56,7 +57,7 @@ export interface ThreadActions {
     text: string,
     answersCommentId?: string,
     optionId?: string,
-  ) => Promise<boolean>;
+  ) => Promise<boolean | Refused>;
   /** Take a recorded answer back. Soft delete on the server: the stamps move
    *  into `answerHistory` and the reply comment stays. */
   undoAnswer: (threadId: string, commentId: string) => Promise<void>;
@@ -94,6 +95,10 @@ export function createThreadActions(deps: ThreadActionDeps): ThreadActions {
       // A failed answer must not read as a posted one: the toast says try
       // again, and the returned `false` is what makes trying again possible —
       // the panel puts the typed words back in the box.
+      // Refused for who is asking: the card says the server's reason in place
+      // of a retry, so no toast tells them to try again.
+      const refused = res.ok ? null : await refusalOf(res);
+      if (refused) return refused;
       if (!res.ok && answersCommentId) {
         showToast('Answer failed to post — try again');
       }

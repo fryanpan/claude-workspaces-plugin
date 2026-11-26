@@ -632,6 +632,26 @@ body.board-body {
   color: var(--fg-muted);
   overflow-wrap: anywhere;
 }
+/* What each person may do. The select and the text a member reads in its
+   place share one width, sized for "Can comment", so changing a level or
+   reading the list as a member moves nothing beside it. */
+.board-member .board-member-level,
+.board-member-level-text {
+  flex: none;
+  width: 15ch;
+}
+.board-member-level-text {
+  display: inline-block;
+  /* The select's own text inset, so a level as text starts where a select's
+     word does: its border and padding, plus the inset Chrome paints the
+     word at (10px measured off screenshots at 1180x820 and 430). */
+  box-sizing: border-box;
+  padding-inline-start: 10px;
+  color: var(--fg-muted);
+}
+.board-member-remove-gap {
+  visibility: hidden;
+}
 /* A person a domain let in sits under that domain's row. */
 .acc-under {
   margin-left: 6px;

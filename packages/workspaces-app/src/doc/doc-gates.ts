@@ -92,12 +92,16 @@ export function wireDocGates(opts: DocGatesOptions): void {
         if (isSuggesting(view.state)) setSuggesting(view, { on: false });
       }
       lockWriteControls(typing ? null : roleLabel(access));
+      // A view member cannot comment either, so the comment pill goes too
+      // (styles.css, COMMENT PILL). A comment member keeps it.
+      document.body.classList.toggle('role-view', !typing && access?.role === 'view');
       setRoleReadingCrumb(document, !typing);
     };
     apply();
     scope.onCleanup(opts.access.onChange(apply));
     scope.onCleanup(() => {
       lockWriteControls(null);
+      document.body.classList.remove('role-view');
       setRoleReadingCrumb(document, false);
     });
   }

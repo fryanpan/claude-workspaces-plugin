@@ -10,6 +10,7 @@ import {
   approveRequest,
   letInRequest,
   resumeAccessWrite,
+  roleRequest,
   sendAccessWrite,
 } from '../src/board/access-writes.ts';
 
@@ -82,5 +83,13 @@ describe('the access writes that widen who is in', () => {
     });
     expect(toast).toHaveBeenCalledWith('@riverbend.test can now sign in');
     expect(await resumeAccessWrite(send, toast)).toBe(false);
+  });
+
+  it('names the level a held level change is for, so its return card says what it does', () => {
+    const r = roleRequest('w-harbor', 'bob@harborlight.example', 'comment');
+    expect(`${r.verb} ${r.name} now?`).toBe('Change bob@harborlight.example to Can comment now?');
+    expect(roleRequest('w-harbor', '@riverbend.example', 'view').name).toBe(
+      'everyone at @riverbend.example to Can view',
+    );
   });
 });

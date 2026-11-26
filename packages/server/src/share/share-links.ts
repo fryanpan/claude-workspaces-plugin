@@ -55,10 +55,12 @@ import {
   type RolesMode,
   accessRoleOf,
   normalizeMemberAccess,
+  widensAccess,
 } from './board-access.ts';
 import {
   type BoardAudience,
   addAudienceEntries,
+  admittingEntry,
   boardAudienceAdmits,
   removeFromAudience,
   seedAudiences,
@@ -370,11 +372,16 @@ export class ShareLinks {
     if (this.loadFailed) return null;
     if (!boardAudienceAdmits(this.audienceOf(workspaceId), who)) return null;
     if (this.members.some((m) => m.workspaceId === workspaceId && m.email === who)) return null;
+    // A domain entry's level is the level its newcomers arrive at.
+    const audience = this.audienceOf(workspaceId);
+    const by = admittingEntry(audience, who);
+    const access = audience?.entries.find((e) => e.match === by)?.access;
     const row: ShareLinkMember = {
       workspaceId,
       email: who,
       addedAt: Date.now(),
       viaLinkId: AUDIENCE_ONLY,
+      ...(access ? { access } : {}),
     };
     this.members.push(row);
     this.save();
@@ -483,6 +490,76 @@ export class ShareLinks {
       .map((m) => m.email);
   }
 
+  /** A domain entry's level, or null when the board holds no such domain. */
+  audienceAccessOf(workspaceId: string, match: string): AccessRole | null {
+    const entry = this.audienceOf(workspaceId)?.entries.find((e) => e.match === match);
+    return entry ? (entry.access ?? 'edit') : null;
+  }
+
+  /**
+   * Set the level an audience entry carries: a `@domain`'s, or an exact
+   * address's. It is the level a newcomer the entry admits arrives at, and
+   * every member it already admits moves to it. An Owner keeps their seat,
+   * and a person with an exact entry of their own is not the domain's.
+   *
+   * A member is RAISED only when `mayWiden` says the owner proved this
+   * request: a domain change that reads as a narrowing can still lift a
+   * member somebody set lower on their own, and re-posting a domain's level
+   * would lift them all. Answers whose level moved, so the caller can hang
+   * up what they have open, or null when the board holds no such entry.
+   */
+  setAudienceAccess(
+    workspaceId: string,
+    match: string,
+    role: AccessRole,
+    opts: { mayWiden?: boolean } = {},
+  ): string[] | null {
+    this.refuseWhileUnreadable();
+    const current = this.audienceOf(workspaceId);
+    if (role === 'owner') return null;
+    if (!current?.entries.some((e) => e.match === match)) return null;
+    const access = role === 'edit' ? undefined : role;
+    const entries = current.entries.map((e) => {
+      if (e.match !== match) return e;
+      const { access: _old, ...rest } = e;
+      return access ? { ...rest, access } : rest;
+    });
+    this.putAudience({ workspaceId, entries });
+    const next = this.audienceOf(workspaceId);
+    const moved: string[] = [];
+    for (const m of this.membersOf(workspaceId)) {
+      if (m.role === 'owner' || admittingEntry(next, m.email) !== match) continue;
+      if (m.access === access) continue;
+      if (!opts.mayWiden && widensAccess(accessRoleOf('member', m.access), role)) continue;
+      this.setMemberRole(workspaceId, m.email, 'member', access);
+      moved.push(m.email);
+    }
+    return moved;
+  }
+
+  /**
+   * Whether setting `match` to `role` would let anyone do more than they can
+   * now: a person going above their own level, or an audience entry whose own
+   * level goes up or that would lift any member it moves. Both the fresh
+   * sign-in check (`fresh-signin.ts`) and the role route's owner proof ask
+   * this one question, so they cannot disagree about what is a raise. True
+   * for anything the board does not hold, which the route answers itself.
+   */
+  raisesAccess(workspaceId: string, match: string, role: AccessRole): boolean {
+    const held = match.startsWith('@') ? null : this.heldAccessOf(workspaceId, match);
+    if (held !== null) return widensAccess(held.access, role);
+    const entryLevel = this.audienceAccessOf(workspaceId, match);
+    if (entryLevel === null || role === 'owner') return true;
+    if (widensAccess(entryLevel, role)) return true;
+    const audience = this.audienceOf(workspaceId);
+    return this.membersOf(workspaceId).some(
+      (m) =>
+        m.role !== 'owner' &&
+        admittingEntry(audience, m.email) === match &&
+        widensAccess(accessRoleOf('member', m.access), role),
+    );
+  }
+
   private putAudience(next: BoardAudience): void {
     this.audiences = [...this.audiences.filter((a) => a.workspaceId !== next.workspaceId), next];
     this.save();
@@ -543,6 +620,25 @@ export class ShareLinks {
     this.members = this.members.map((m) => (m === row ? next : m));
     this.save();
     return true;
+  }
+
+  /**
+   * The seat and level of a member row that already exists, or null. Unlike
+   * `roleOf` it never writes a row for an address only the audience names:
+   * it is asked before a route has decided the caller may ask
+   * (`fresh-signin.ts`), and by the role route, where an address nobody has
+   * signed in with is an audience entry, not a member.
+   */
+  heldAccessOf(
+    workspaceId: string,
+    email: string | null | undefined,
+  ): { seat: BoardRole; access: AccessRole } | null {
+    const who = email ? normalizeEmail(email) : '';
+    if (who === '' || !workspaceId) return null;
+    const row = this.admittedRow(workspaceId, who);
+    if (!row) return null;
+    const seat = row.role ?? DEFAULT_BOARD_ROLE;
+    return { seat, access: accessRoleOf(seat, row.access) };
   }
 
   /** The four-word role (`board-access.ts`), or null when not a member. */

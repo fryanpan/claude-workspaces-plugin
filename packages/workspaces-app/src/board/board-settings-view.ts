@@ -152,6 +152,7 @@ export function buildSettingsView(): string {
                 <a id="board-access-waiting" class="acc-waiting hidden" href="/access/waiting"><span id="board-access-waiting-label"></span><svg class="prompt-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18l6-6-6-6"></path></svg></a>
                 <p class="acc-sub">People</p>
                 <div id="board-members-list" class="board-members"></div>
+                <p id="board-members-legend" class="board-settings-note hidden"></p>
                 <form id="board-access-add" class="acc-add hidden" autocomplete="off">
                   <label class="acc-sub" for="board-access-input">Add someone</label>
                   <input id="board-access-input" class="board-cap-input" name="match" type="text" inputmode="email" autocapitalize="off" spellcheck="false" placeholder="name@company.com or @company.com" />
