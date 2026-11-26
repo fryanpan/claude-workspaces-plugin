@@ -80,14 +80,33 @@ name: CI
 # those runs. 118 lines is 0.1% of server coverage, against a 1.1% margin
 # over its floor (84.1% measured, 83 floor).
 #
+# THE FIFTH PASS, 2026-11-26. Twenty green runs after the fourth pass
+# (45711359355-45827238503) put the slowest job at 94-118s in the 19 that
+# were not re-run, a browser shard in all of them. In the five main runs whose logs were read, that shard's
+# heaviest file was show-estimates-browser.test.ts (85-91s) twice,
+# doc-save-race-browser.test.ts (75-78s) twice and check-mock-render.test.ts
+# (82s) once. Most browser shards end within 6s of their own heaviest file,
+# so that file sets a browser shard's time, not the files beside it. The
+# show-estimates file spent 59 of its 63 local seconds on one navigation
+# waiting for Chrome's back/forward cache (the comment on the browser step
+# says why); with the cache off it ran 31s on CI and 17s in core mode, and
+# the run took 102s against a 107-151s range on main.
+#
 # THE JOB BUDGET IS 40. The account runs at most 40 jobs at once: two runs
 # that overlapped on 25 Nov peaked at exactly 40 running, and 24 of the
-# second run's jobs waited about 60s for a runner. The parallel jobs here
-# total 40 (2 gates + 5 + 14 + 3 + 3 + 13), so a PR run on its own never
-# queues. A push to main can also start release.yml, fly.yml or
-# cloudflare.yml, whose jobs count against the same 40. A 41st job queues behind the first one to finish, roughly a minute
-# on every verdict, so a new shard needs one taken from somewhere else.
-# That is why `client-browser-core` has 13 shards and not 14.
+# second run's jobs waited about 60s for a runner. The fourth pass filled
+# all 40, so ANY other job queued one of ours: fly.yml's deploys (four jobs,
+# about ten minutes, 24 runs from 20 to 26 Nov), release.yml, and a fly
+# deploy job that hung from 08:02 to 14:02 on 26 Nov. In 10 of those 20
+# runs at least one job waited 48-64s for a runner, and a queued browser
+# shard ends ~50s after the rest. Two of our own runs overlapping still
+# queue; nothing short of halving the run avoids that. So the parallel
+# jobs now total 36 (2 gates + 5 + 11 + 3 + 3 + 12), four free for a fly
+# deploy. Fewer browser shards cost little because
+# a browser shard is bound by its heaviest file: replayed on the refreshed
+# table, 11 shards put at most 203 file-seconds in one, inside the 243 that
+# a shard of the fourth pass ran beside a 74s file and still ended in 81s.
+# A new shard needs one taken from somewhere else, or it spends the margin.
 #
 # WHAT DID NOT CHANGE. Every gate that ran before runs now — `bun run
 # verify:parity` is the enforcement, and it reads EVERY job in this file
@@ -311,7 +330,7 @@ jobs:
   # per file in scripts/vitest-sequencer.ts) run in `client-browser`: two
   # workers per runner, lighter than main's four. Every other file runs here
   # (`CW_VITEST_KIND=unit`) with the full four workers. Replaying the table:
-  # 130 browser files, 2,076s, are at most ~76s per shard across 14 shards of
+  # 130 browser files, 2,076s, were at most ~76s per shard across 14 shards of
   # two workers. The 817 unit files measured more than the table said: each
   # file pays transform, setup, import and a happy-dom environment, about
   # 200s per 270-file shard, so three unit shards ran 67-103s of vitest
@@ -365,7 +384,7 @@ jobs:
       fail-fast: false
       matrix:
         # Add a shard here and the `ci` job's expected lcov count below too.
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -485,10 +504,10 @@ jobs:
   # the real board and doc pages, so with CW_COLLAB_CORE_DEFAULT=on every page
   # they open syncs through the collab core. No coverage, for the reason
   # `server-core` gives. At 7 shards this was the slowest job of the run
-  # (110-128s). It has 13 shards, one fewer than `client-browser`, so that the
-  # run fits the 40-job budget described at the top of this file. Replayed on
-  # the refreshed table, the slowest shard is 91 case-seconds per worker at 13
-  # against 85 at 14.
+  # (110-128s). It has 12 shards, one more than `client-browser`, because
+  # its heaviest files run longer here (doc-save-race 69s, comments-in-view
+  # 68s): replayed on the table, 12 put at most 192 file-seconds in a shard
+  # against 209 at 11. The total is the 40-job budget at the top of this file.
   client-browser-core:
     runs-on: ubuntu-latest
     permissions:
@@ -496,7 +515,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -570,8 +589,8 @@ jobs:
           cat .lcov/lcov-server-*/lcov.info > .coverage/server/lcov.info
           client=$(ls -d .lcov/lcov-client-* | wc -l)
           server=$(ls -d .lcov/lcov-server-* | wc -l)
-          if [ "$client" -ne 19 ] || [ "$server" -ne 3 ]; then
-            echo "::error::merged $client client and $server server lcov file(s), expected 19 (5 unit + 14 browser) and 3 — the coverage number would be measured from part of the suite."
+          if [ "$client" -ne 16 ] || [ "$server" -ne 3 ]; then
+            echo "::error::merged $client client and $server server lcov file(s), expected 16 (5 unit + 11 browser) and 3 — the coverage number would be measured from part of the suite."
             exit 1
           fi
           wc -c .coverage/vitest/lcov.info .coverage/server/lcov.info
