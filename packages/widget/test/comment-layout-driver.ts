@@ -238,6 +238,12 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     return p;
   };
   const settle = () => sleep(250);
+  /** Polls `read` until it holds; throws naming `what` after 10s. */
+  const until = async (what: string, read: () => Promise<boolean>): Promise<void> => {
+    for (const end = Date.now() + 10_000; Date.now() < end; await sleep(25))
+      if (await read()) return;
+    throw new Error(`never happened: ${what}`);
+  };
   /** Turn the device: the same page at another viewport. */
   const turn = async (w: number, h: number): Promise<void> => {
     await cdp.send('Emulation.setDeviceMetricsOverride', {
@@ -325,16 +331,18 @@ async function drive(cdp: Cdp, dir: string, bundle: string, width: number, heigh
     // Zoomed in and scrolled down and right inside the zoom: the visual
     // viewport is half the height and starts partway down the layout
     // viewport, as when an iPad's keyboard pushes the page up, and partway in.
+    // The wheel lands whole, in CSS px. At scale 2 the view can move 590 in,
+    // so a deltaX of 600 clamped there and showed the window's right edge.
     await cdp.send('Emulation.setPageScaleFactor', { pageScaleFactor: 2 });
-    await settle();
+    await until('the zoom', async () => (await cdp.evaluate('visualViewport.scale')) === 2);
     await cdp.send('Input.dispatchMouseEvent', {
       type: 'mouseWheel',
       x: 300,
       y: 300,
-      deltaX: 600,
+      deltaX: 540,
       deltaY: 1000,
     });
-    await settle();
+    await until('the wheel', async () => (await cdp.evaluate('visualViewport.offsetLeft')) !== 0);
     await look('zoomed');
     await cdp.send('Emulation.setPageScaleFactor', { pageScaleFactor: 1 });
     await cdp.evaluate('scrollTo(0, 0)');
