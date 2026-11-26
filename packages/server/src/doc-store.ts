@@ -2755,6 +2755,19 @@ export class DocStore {
     if (doc) this.saveToDisk(doc);
   }
 
+  /**
+   * Record that the server itself wrote this doc's file (a template it put
+   * on disk to bind), so the board made it. Call before the bind, which
+   * would otherwise read the file as one that was already there
+   * (`seededFromFile`). A doc that already says either way keeps its answer.
+   */
+  noteMadeHere(docId: string): void {
+    const doc = this.resolveDoc(docId);
+    if (!doc || doc.meta.seededFromFile !== undefined) return;
+    doc.meta.seededFromFile = false;
+    this.saveToDisk(doc);
+  }
+
   // ── Comment threads ──────────────────────────────────────────────────────
   //
   // The verbs live in `doc-threads.ts`; what follows is the store's public

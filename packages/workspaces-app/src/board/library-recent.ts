@@ -1,9 +1,17 @@
 /**
- * The Library front page's two lists, as two tabs in one row (Bryan,
- * 2026-11-13): Recently Viewed, what the person reading opened, by when they
- * opened it (`packages/server/src/library-views.ts` keeps that, one list per
- * person, and never an agent's reads), and Recently Created, the board's
- * items by when each was made.
+ * The Library front page's three lists, as tabs in one row (Bryan,
+ * 2026-11-13, and a third on the hub feedback doc): Recently Viewed, what
+ * the person reading opened, by when they opened it
+ * (`packages/server/src/library-views.ts` keeps that, one list per person,
+ * and never an agent's reads); Recently Modified, every file by its last
+ * change; and Recently Created, the board's docs by when the board made each.
+ *
+ * Recently Created lists what the board made: a new board doc, or a new file
+ * an agent wrote through the doc tools. A project file, opened or not, has
+ * no created time (the server's `createdOnBoard`): its only clock is its
+ * bytes' birth time, and a `git pull` that changes a file writes a new one,
+ * so that clock cannot tell a new file from an edited one. It was the whole
+ * reason the old Created tab read as Modified.
  *
  * Markup and the stored tab choice; `library-page.ts` wires the events.
  */
@@ -18,8 +26,14 @@ import {
   fileEntries,
 } from './library-model.ts';
 
-/** Which of the two lists the tab row shows. */
-export type RecentTab = 'viewed' | 'created';
+/** Which of the three lists the tab row shows. */
+export type RecentTab = 'viewed' | 'modified' | 'created';
+
+/** The tabs, in the row's order. */
+export const RECENT_TABS: readonly RecentTab[] = ['viewed', 'modified', 'created'];
+
+const isTab = (v: string | null | undefined): v is RecentTab =>
+  v === 'viewed' || v === 'modified' || v === 'created';
 
 /** Where this device keeps the tab last picked: a per-device choice. */
 export const RECENT_TAB_KEY = 'cw-library-recent-tab';
@@ -32,7 +46,8 @@ export interface RecentTabStorage {
 /** The stored tab, or Recently Viewed when none is stored or storage is blocked. */
 export function readRecentTab(storage: RecentTabStorage | undefined): RecentTab {
   try {
-    return storage?.getItem(RECENT_TAB_KEY) === 'created' ? 'created' : 'viewed';
+    const stored = storage?.getItem(RECENT_TAB_KEY);
+    return isTab(stored) ? stored : 'viewed';
   } catch {
     return 'viewed';
   }
@@ -79,14 +94,16 @@ type RowHtml = (row: LibraryRow, opts: { clock: LibrarySort; showFolder?: boolea
 
 const TAB_LABEL: Record<RecentTab, string> = {
   viewed: 'Recently Viewed',
+  modified: 'Recently Modified',
   created: 'Recently Created',
 };
 
 /**
- * The two tabs, then the chosen list. The tabs keep their place and width
- * whichever is chosen: one weight for both labels, the underline always
- * drawn and only coloured. Recently Viewed's "Show more" sits at the row's
- * right, sized for its longer label, so it moves nothing either.
+ * The tabs, then the chosen list. The tabs keep their place and width
+ * whichever is chosen: one weight for every label, the underline always
+ * drawn and only coloured. The row holds the tabs and nothing else: three
+ * labels fill it at 430, so Recently Viewed's "Show more" sits under its
+ * table, where "See all files" sits under the other two.
  */
 export function recentTabsHtml(
   tab: RecentTab,
@@ -94,54 +111,71 @@ export function recentTabsHtml(
   opts: {
     viewedOpen: boolean;
     rowHtml: RowHtml;
-    entryHtml: (entry: LibraryFileEntry) => string;
+    entryHtml: (entry: LibraryFileEntry, clock: LibrarySort) => string;
   },
 ): string {
-  const tabs = (['viewed', 'created'] as const)
-    .map(
-      (t) =>
-        `<button type="button" role="tab" class="board-detail-tab lf-recent-tab" id="lf-tab-${t}" data-lf-tab="${t}" aria-selected="${t === tab}" aria-controls="lf-panel-${t}" tabindex="${t === tab ? 0 : -1}">${TAB_LABEL[t]}</button>`,
-    )
-    .join('');
+  const tabs = RECENT_TABS.map(
+    (t) =>
+      `<button type="button" role="tab" class="board-detail-tab lf-recent-tab" id="lf-tab-${t}" data-lf-tab="${t}" aria-selected="${t === tab}" aria-controls="lf-panel-${t}" tabindex="${t === tab ? 0 : -1}">${TAB_LABEL[t]}</button>`,
+  ).join('');
   const viewed = viewedRows(payload);
-  const toggle =
-    tab === 'viewed' && viewed.length > LIBRARY_VIEWED
-      ? `<button type="button" class="lf-newfolder lf-viewmore" data-lf-viewmore aria-expanded="${opts.viewedOpen}">${opts.viewedOpen ? 'Show less' : 'Show more'}</button>`
-      : '';
   const panel =
     tab === 'viewed'
       ? viewedPanelHtml(viewed, opts.viewedOpen, opts.rowHtml)
-      : createdPanelHtml(payload, opts.entryHtml);
-  return `<div class="lf-section-head lf-recent-tabs"><div class="lf-tablist" role="tablist" aria-label="Recent files">${tabs}</div>${toggle}</div><div class="lf-recent-panel" role="tabpanel" id="lf-panel-${tab}" aria-labelledby="lf-tab-${tab}" data-lf-panel="${tab}">${panel}</div>`;
+      : clockPanelHtml(payload, tab, opts.entryHtml);
+  return `<div class="lf-section-head lf-recent-tabs"><div class="lf-tablist" role="tablist" aria-label="Recent files">${tabs}</div></div><div class="lf-recent-panel" role="tabpanel" id="lf-panel-${tab}" aria-labelledby="lf-tab-${tab}" data-lf-panel="${tab}">${panel}</div>`;
 }
 
 function viewedPanelHtml(rows: readonly LibraryRow[], open: boolean, rowHtml: RowHtml): string {
   const shown = rows.slice(0, open ? LIBRARY_VIEWED_MORE : LIBRARY_VIEWED);
   const inner = shown.map((r) => rowHtml(r, { clock: 'modified', showFolder: true })).join('');
-  return fixedTable('Viewed', inner, 'Nothing opened yet.');
+  const toggle =
+    rows.length > LIBRARY_VIEWED
+      ? `<button type="button" class="lf-newfolder lf-viewmore" data-lf-viewmore aria-expanded="${open}">${open ? 'Show less' : 'Show more'}</button>`
+      : '';
+  return `${fixedTable('Viewed', inner, 'Nothing opened yet.')}${toggle}`;
+}
+
+/** The rows Recently Created lists: board docs with a record's birth. */
+export function createdRows(payload: LibraryPayload): LibraryRow[] {
+  return recentRows(payload, 'created').filter(
+    (r) => r.docId !== undefined && r.created !== undefined,
+  );
 }
 
 /**
- * Recently Created, counted in ENTRIES: a burst is one line of the ten, so a
- * generator's run cannot push everything else off the front page.
+ * Recently Modified or Recently Created, counted in ENTRIES: a burst is one
+ * line of the ten, so a generator's run cannot push everything else off the
+ * front page.
  */
-function createdPanelHtml(
+function clockPanelHtml(
   payload: LibraryPayload,
-  entryHtml: (entry: LibraryFileEntry) => string,
+  clock: LibrarySort,
+  entryHtml: (entry: LibraryFileEntry, clock: LibrarySort) => string,
 ): string {
   const meetings = new Set(payload.meetings);
-  const entries = fileEntries(recentRows(payload, 'created'), 'created', (r) => meetings.has(r));
+  const rows = clock === 'created' ? createdRows(payload) : recentRows(payload, 'modified');
+  const entries = fileEntries(rows, clock, (r) => meetings.has(r));
   const more =
     entries.length > LIBRARY_RECENT.files
-      ? '<button type="button" class="library-more" data-list="files">See all files</button>'
+      ? `<button type="button" class="library-more" data-list="files" data-sort="${clock}">See all files</button>`
       : '';
-  const shown = entries.slice(0, LIBRARY_RECENT.files).map(entryHtml).join('');
-  return `${fixedTable('Created', shown, 'No files yet.')}${more}`;
+  const shown = entries
+    .slice(0, LIBRARY_RECENT.files)
+    .map((e) => entryHtml(e, clock))
+    .join('');
+  const head = clock === 'created' ? 'Created' : 'Modified';
+  const empty =
+    clock === 'created'
+      ? 'Nothing made on this board yet. Files already in the project are under Recently Modified.'
+      : 'No files yet.';
+  return `${fixedTable(head, shown, empty)}${more}`;
 }
 
 /**
- * A tap on a tab picks it; on a focused tab, Left/Right/Home/End pick the
- * other one (the ARIA tabs pattern, where only the chosen tab is a Tab stop).
+ * A tap on a tab picks it; on a focused tab, Left/Right pick its neighbour
+ * and Home/End the first or last (the ARIA tabs pattern, where only the
+ * chosen tab is a Tab stop).
  * Focus follows the pick onto the re-rendered tab.
  */
 export function wireRecentTabs(root: HTMLElement, pick: (tab: RecentTab) => void): void {
@@ -151,18 +185,21 @@ export function wireRecentTabs(root: HTMLElement, pick: (tab: RecentTab) => void
   };
   root.addEventListener('click', (e) => {
     const hit = (e.target as Element).closest<HTMLElement>('[data-lf-tab]');
-    if (hit) choose(hit.dataset.lfTab === 'created' ? 'created' : 'viewed');
+    const tab = hit?.dataset.lfTab;
+    if (isTab(tab)) choose(tab);
   });
   root.addEventListener('keydown', (e) => {
     const on = (e.target as Element).closest<HTMLElement>('[data-lf-tab]');
     if (!on) return;
-    const next: Record<string, RecentTab> = {
-      ArrowLeft: 'viewed',
-      Home: 'viewed',
-      ArrowRight: 'created',
-      End: 'created',
+    const at = RECENT_TABS.indexOf(isTab(on.dataset.lfTab) ? on.dataset.lfTab : 'viewed');
+    const last = RECENT_TABS.length - 1;
+    const step: Record<string, number> = {
+      ArrowLeft: Math.max(0, at - 1),
+      ArrowRight: Math.min(last, at + 1),
+      Home: 0,
+      End: last,
     };
-    const tab = next[e.key];
+    const tab = RECENT_TABS[step[e.key] ?? -1];
     if (!tab) return;
     e.preventDefault();
     choose(tab);

@@ -44,6 +44,8 @@ export interface CoachWiringDeps {
       init: { type: 'markdown'; sourceUrl: string; title: string },
     ): { ok: true; doc: { docId: string } } | { ok: false };
     attachFileAsync(docId: string, path: string): Promise<{ ok: boolean }>;
+    /** The server wrote the file from its template: the board made it. */
+    noteMadeHere?(docId: string): void;
     docExists(docId: string): boolean;
     readMarkdownBody(docId: string): string | null;
   };
@@ -202,6 +204,10 @@ export function wireCoach(deps: CoachWiringDeps): CoachWiring {
       });
       if (!created.ok) return null;
       const id = created.doc.docId;
+      // The server wrote this file from its own template, so the board made
+      // it. Said before the bind, which would otherwise read the file as one
+      // that was already on disk and keep it off Recently Created.
+      deps.docStore.noteMadeHere?.(id);
       deps.fileUnderBoard(id, workspaceId);
       const attached = await deps.docStore.attachFileAsync(id, path);
       return attached.ok ? id : null;

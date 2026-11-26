@@ -24,6 +24,7 @@ const PAYLOAD: LibraryPayload = {
       at: NOW - 3 * HOUR,
       created: NOW - 4 * HOUR,
       href: '/m/1',
+      docId: 'm-1',
       place: 'meetings:docs/meetings:',
     },
     {
@@ -31,6 +32,7 @@ const PAYLOAD: LibraryPayload = {
       at: NOW - 10 * DAY,
       created: NOW - 10 * DAY,
       href: '/m/2',
+      docId: 'm-2',
       place: 'meetings:Stored by Workspaces:not in docs/meetings',
     },
   ],
@@ -40,6 +42,7 @@ const PAYLOAD: LibraryPayload = {
       at: NOW - HOUR,
       created: NOW - 20 * DAY,
       href: '/f/1',
+      docId: 'f-1',
       place: 'documents:docs:',
     },
     {
@@ -47,6 +50,7 @@ const PAYLOAD: LibraryPayload = {
       at: NOW - 2 * DAY,
       created: NOW - 2 * HOUR,
       href: '/f/2',
+      docId: 'f-2',
       place: 'documents:notes:not mounted',
     },
     { name: 'README.md', at: NOW - 3 * DAY, open: 'README.md' },
@@ -84,14 +88,12 @@ const PAYLOAD: LibraryPayload = {
   ],
 };
 
-const drive = (payload: LibraryPayload = PAYLOAD) =>
-  driveLibrary(WS, payload, NOW, { payload, recentTab: 'created' });
+const drive = (payload: LibraryPayload = PAYLOAD, recentTab: 'modified' | 'created' = 'modified') =>
+  driveLibrary(WS, payload, NOW, { payload, recentTab });
 
-/** Recently Created: the first table; Recently Viewed and the tree follow. */
+/** The tab's table, or the full list's: the first table; the tree follows. */
 const recent = (root: ParentNode) =>
-  root.querySelector(
-    '[data-lf-panel=created] > .library-tbl, .library-all > h2 + .library-tbl',
-  ) as Element;
+  root.querySelector('[data-lf-panel] > .library-tbl, .library-all > h2 + .library-tbl') as Element;
 const cells = (root: ParentNode) =>
   [...root.querySelectorAll('.library-row:not(.lf-folder)')].map((r) => [
     r.querySelector('.library-name')?.textContent,
@@ -108,19 +110,34 @@ afterEach(() => {
 });
 
 describe('the time column', () => {
-  it('heads Recently Created "Created", newest first, a date past a week, no birth last', async () => {
-    const { page, root } = drive();
+  it('heads Recently Created "Created": board docs newest-made first, a date past a week', async () => {
+    const { page, root } = drive(PAYLOAD, 'created');
     await page.open();
     // The front page's lists are fixed: no sort to choose there.
     expect(root.querySelector('.library-sort')).toBeNull();
     expect(recent(root).querySelector('.lf-colhead')?.textContent).toBe('Created');
+    // delay-alerts.md changed an hour ago but was made twenty days ago, so it
+    // sits last. README.md is a project file the board did not make: it has
+    // no created time, so it is not listed here.
     expect(cells(recent(root))).toEqual([
       ['dock-survey.md', '2h ago'],
       ['Booking flow walkthrough', '4h ago'],
       // Ten days ago is a date, not "1w ago".
       ['Kickoff', expect.not.stringMatching(/ago$/)],
       ['delay-alerts.md', expect.not.stringMatching(/ago$/)],
-      ['README.md', '—'],
+    ]);
+  });
+
+  it('heads Recently Modified "Modified", newest change first, a file with no clock last', async () => {
+    const { page, root } = drive();
+    await page.open();
+    expect(recent(root).querySelector('.lf-colhead')?.textContent).toBe('Modified');
+    expect(cells(recent(root)).map((c) => c[0])).toEqual([
+      'delay-alerts.md',
+      'Booking flow walkthrough',
+      'dock-survey.md',
+      'README.md',
+      'Kickoff',
     ]);
   });
 
@@ -154,7 +171,7 @@ describe('the time column', () => {
     expect(document.activeElement).toBe(again);
   });
 
-  it('keeps "See all" under Recently Created, and the full list sorts by creation', async () => {
+  it('keeps "See all" under Recently Modified, and the full list sorts by creation', async () => {
     const many: LibraryPayload = {
       ...PAYLOAD,
       meetings: Array.from({ length: 9 }, (_, i) => ({
@@ -175,13 +192,37 @@ describe('the time column', () => {
       'created',
     );
     // By creation: dock-survey.md (2h), the nine meetings (4-12h, the last
-    // made first), delay-alerts.md (20d), then README.md, with no birth time.
+    // made first), delay-alerts.md (20d), then README.md, with no created time.
     expect(cells(root).map((c) => c[0])).toEqual([
       'dock-survey.md',
       ...Array.from({ length: 9 }, (_, i) => `Delay alert timing ${9 - i}`),
       'delay-alerts.md',
       'README.md',
     ]);
+  });
+
+  it('opens "See all" under Recently Created on the full list sorted by Created', async () => {
+    const many: LibraryPayload = {
+      ...PAYLOAD,
+      meetings: Array.from({ length: 9 }, (_, i) => ({
+        name: `Delay alert timing ${i + 1}`,
+        at: NOW - i * HOUR,
+        created: NOW - (12 - i) * HOUR,
+        href: `/m/${i}`,
+        docId: `m-${i + 10}`,
+      })),
+    };
+    const { page, root } = drive(many, 'created');
+    await page.open();
+    const tab = cells(recent(root)).map((c) => c[0]);
+    await click(root.querySelector('.library-more[data-list=files]') as HTMLElement);
+    const sort = root.querySelector('.library-sort[data-list=files]') as HTMLSelectElement;
+    expect(sort.value).toBe('created');
+    // The full list continues the tab's order: the same ten first, by the
+    // same created time, then what the board did not make.
+    const all = cells(root).map((c) => c[0]);
+    expect(all.slice(0, tab.length)).toEqual(tab);
+    expect(all.at(-1)).toBe('README.md');
   });
 });
 
@@ -199,7 +240,7 @@ describe('where files live', () => {
       [...body.querySelectorAll(':scope > h2, .lf-section-head h2, [role=tab]')].map(
         (h) => h.textContent,
       ),
-    ).toEqual(['Recently Viewed', 'Recently Created', 'Folders']);
+    ).toEqual(['Recently Viewed', 'Recently Modified', 'Recently Created', 'Folders']);
 
     const kinds = [...fold.querySelectorAll('.library-where-type')].map((t) => [
       t.querySelector('.library-where-name')?.textContent,

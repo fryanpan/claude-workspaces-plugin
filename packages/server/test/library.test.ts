@@ -245,6 +245,59 @@ describe('buildLibrary', () => {
     ]);
   });
 
+  it('dates only what the board made as created; a doc that binds an existing file has none', () => {
+    // `d-made`'s file did not exist until the board wrote it, and `d-sketch`
+    // has no file at all. `d-bound` gave a file already on disk a record, and
+    // `d-legacy` was bound before the flag existed, so it cannot say which:
+    // neither is created, whatever its record says.
+    const file = (id: string) => `/repo/docs/${id}.md`;
+    const lib = buildLibrary(
+      sources({
+        docs: [
+          meta('d-made', {
+            title: 'Saltmarsh plan',
+            createdAt: 1_000,
+            sourceUrl: file('d-made'),
+            seededFromFile: false,
+          }),
+          meta('d-sketch', { title: 'Quay sketch', type: 'whiteboard', createdAt: 2_000 }),
+          meta('d-bound', {
+            title: 'Harborlight readme',
+            createdAt: 9_000,
+            sourceUrl: file('d-bound'),
+            seededFromFile: true,
+          }),
+          meta('d-legacy', { title: 'Riverbend notes', createdAt: 9_100, sourceUrl: file('x') }),
+        ],
+        docKeyOf: (id) => makeDocKey(REPO, `docs/${id}.md`),
+        projectRoot: () => null,
+        fileMtime: () => 9_500,
+      }),
+    );
+    expect(lib.files.map((r) => [r.name, r.created]).sort()).toEqual([
+      ['Harborlight readme', undefined],
+      ['Quay sketch', 2_000],
+      ['Riverbend notes', undefined],
+      ['Saltmarsh plan', 1_000],
+    ]);
+  });
+
+  it('gives a whiteboard, which has no file, its own last activity as its modified clock', () => {
+    // A whiteboard lives in its record alone: no bytes to stat.
+    const lib = buildLibrary(
+      sources({
+        docs: [
+          meta('d-board', { title: 'Quay layout', type: 'whiteboard', lastActivityAt: 7_000 }),
+          meta('d-fresh', { title: 'Tide chart', type: 'whiteboard', createdAt: 3_000 }),
+        ],
+      }),
+    );
+    expect(lib.files.map((r) => [r.name, r.at])).toEqual([
+      ['Quay layout', 7_000],
+      ['Tide chart', 3_000],
+    ]);
+  });
+
   it("takes the project from the board's own docs, not a review's members", () => {
     const other = 'git:example.com/harborlight/saltmarsh';
     const keys: Record<string, string> = {
