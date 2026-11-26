@@ -385,7 +385,12 @@ describe('the lead chat client', () => {
     // A read taken AFTER the line holds it already, and keeps it once.
     stream.fire('error');
     stream.fire('open');
-    answers[2]?.({ lead: null, messages: [], canTalk: true, meeting: { ...meeting, lines: [line] } });
+    answers[2]?.({
+      lead: null,
+      messages: [],
+      canTalk: true,
+      meeting: { ...meeting, lines: [line] },
+    });
     await settle();
     expect(client.state().meeting?.lines).toEqual([line]);
   });
