@@ -23,6 +23,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type ServerHandle, createServer } from '../src/server.ts';
+import { OBSERVED_LIVE_MS } from '../src/task-agents.ts';
 import { workspaceDocId } from '../src/task-projection.ts';
 import {
   type AgentAttachment,
@@ -333,25 +334,26 @@ describe('TaskStore attachment registry', () => {
     expect(events.filter((e) => e.type === 'agent.detached')).toHaveLength(1);
   });
 
-  it('hasLiveAttachment is OBSERVED freshness, not mere existence', async () => {
+  it('hasLiveAttachment is OBSERVED freshness, not mere existence', () => {
     // The window this reads used to be `heartbeatFreshMs` — i.e. how recently
     // the agent SAID it was alive. It is now how recently the server OBSERVED
-    // it, by heartbeat or by write, so both knobs are set here: leaving
-    // `observedWorkFreshMs` at its 15-minute default would keep the fresh
-    // attach inside the window and this test would never see it go stale.
-    // See OBSERVED_LIVE_MS and voice-gate-liveness.test.ts for why it changed.
-    const tight = new TaskStore({
-      dataDir,
-      debounceMs: 5,
-      heartbeatFreshMs: 30,
-      observedWorkFreshMs: 30,
-    });
+    // it, by heartbeat or by write. See OBSERVED_LIVE_MS and
+    // voice-gate-liveness.test.ts for why it changed.
+    //
+    // The clock is injected and the window is the production constant. This
+    // case used to shrink both windows to 30ms and sleep 60ms, and on a loaded
+    // CI runner createWorkspace plus attachAgent alone took 34ms, so the
+    // positive control read a fresh attach as already stale.
+    let t = 1_000_000;
+    const tight = new TaskStore({ dataDir, debounceMs: 5, now: () => t });
     const ws = tight.createWorkspace('live-board');
     expect(tight.hasLiveAttachment(ws.id)).toBe(false);
     tight.attachAgent(ws.id, { agentId: 'lead', runtime: 'claude-code-local' });
-    // Positive control: fresh → live.
+    // Positive control: fresh → live, and still live one tick inside the window.
     expect(tight.hasLiveAttachment(ws.id)).toBe(true);
-    await new Promise((r) => setTimeout(r, 60));
+    t += OBSERVED_LIVE_MS - 1;
+    expect(tight.hasLiveAttachment(ws.id)).toBe(true);
+    t += 1;
     // The record still exists, but nothing has been observed since. Existence
     // was never the question.
     expect(tight.listAttachments(ws.id)).toHaveLength(1);
