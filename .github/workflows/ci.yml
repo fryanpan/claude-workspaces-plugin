@@ -379,8 +379,18 @@ jobs:
         # reason: these files launch the runner's own Chrome, and a container
         # needs both flags to let it start. Without CW_BROWSER_TESTS their
         # cases would skip, and this job would pass having tested nothing.
+        #
+        # The back/forward cache is off because no browser case goes back in
+        # history, and with it on a page the driver navigated away from keeps
+        # its event streams open. Over HTTP/1.1 loopback Chrome gives a host
+        # six connections, so after a dozen navigations the next one waited
+        # 59s for a cached page to be evicted: measured on
+        # show-estimates-browser-driver.ts, 63s with the cache and 5s without,
+        # same readings. A page served over HTTP/2 shares one connection and
+        # does not stall, but a person on plain http (localhost, a LAN or
+        # tailnet address) would; that is a product issue, not this flag's.
         env:
-          CW_CHROME_ARGS: --no-sandbox --disable-dev-shm-usage
+          CW_CHROME_ARGS: --no-sandbox --disable-dev-shm-usage --disable-features=BackForwardCache
           CW_BROWSER_TESTS: '1'
           CW_VITEST_KIND: browser
         run: |
@@ -497,7 +507,7 @@ jobs:
         run: timeout -k 5 60 bun install --frozen-lockfile || timeout -k 5 60 bun install --frozen-lockfile
       - name: Test (browser, every board on the collab core)
         env:
-          CW_CHROME_ARGS: --no-sandbox --disable-dev-shm-usage
+          CW_CHROME_ARGS: --no-sandbox --disable-dev-shm-usage --disable-features=BackForwardCache
           CW_BROWSER_TESTS: '1'
           CW_VITEST_KIND: browser
           CW_COLLAB_CORE_DEFAULT: 'on'
