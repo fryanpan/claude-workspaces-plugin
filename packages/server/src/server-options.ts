@@ -454,6 +454,14 @@ export interface ServerOptions {
    * Unset, the loop reads `Date.now`.
    */
   schedulerNow?: () => number;
+  /**
+   * The stall pass's clock: what it judges a row's quiet against. A test seam
+   * for the same reason `schedulerNow` is one. With `stallNudgeQuietMs` alone,
+   * a test that needs one row fresh and another stale races the runner: a
+   * pause longer than the window between the fresh write and the pass turns
+   * the fresh row stale. Unset, the pass reads `Date.now`.
+   */
+  stallNow?: () => number;
   /** How often that loop looks (ms). Unset → SCHEDULER_TICK_DEFAULT_MS. */
   schedulerTickMs?: number;
   /**
