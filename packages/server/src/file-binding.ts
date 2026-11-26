@@ -805,10 +805,13 @@ export class FileBindings {
     const docId = doc.meta.docId;
     void gitTracking(abs).then((tracking) => {
       if (tracking !== 'untracked') return;
-      // Still in memory and still undecided: a doc evicted meanwhile keeps
-      // its answer rather than being written from a stale copy.
+      // Still in memory, still undecided, still bound to this file and still
+      // its writer. A doc evicted, archived or rebound meanwhile, or one a
+      // newer doc took the path from, keeps its answer and writes nothing.
       const live = this.p.residentDoc(docId);
       if (live !== doc || live.meta.seededFromFile !== true) return;
+      const binding = this.bindings.get(docId);
+      if (binding?.path !== abs || binding.writeBackSuspended) return;
       live.meta.seededFromFile = false;
       this.p.schedulePersist(live);
     });

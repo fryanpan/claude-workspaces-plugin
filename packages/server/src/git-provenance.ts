@@ -1,7 +1,7 @@
 import { execFile, spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { basename, dirname } from 'node:path';
-import { gitBarred, hardenedGitArgs, hardenedGitEnv } from './git-hardening.ts';
+import { gitBarred, hardenedGitArgs, hardenedGitEnv, repoOf } from './git-hardening.ts';
 
 /**
  * Was the content a reconcile is about to overwrite written by GIT rather
@@ -245,7 +245,8 @@ export function gitTracking(
     // Missing or dangling: the call below answers `unknown`.
   }
   const cwd = dirname(resolved);
-  if (gitBarred(cwd)) return Promise.resolve('unknown');
+  // No repository above the file: answer without spawning git on every bind.
+  if (repoOf(cwd) === null || gitBarred(cwd)) return Promise.resolve('unknown');
   // `--literal-pathspecs`: the basename is a file name, never a pattern.
   const args = hardenedGitArgs(['--literal-pathspecs', 'ls-files', '-z', '--', basename(resolved)]);
   return new Promise((done) => {
