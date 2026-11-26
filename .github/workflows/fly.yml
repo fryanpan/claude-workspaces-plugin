@@ -71,6 +71,11 @@ jobs:
       matrix:
         project: ${{ fromJSON(needs.projects.outputs.matrix) }}
     runs-on: ubuntu-latest
+    # 45 successful deploy jobs (15 runs, 44848987285-45619413465) took
+    # 0.3-9.6 minutes, median 6.5. Without a bound, a hung deploy holds a
+    # runner for GitHub's 360-minute default: on 26 Nov one did, 08:02-14:02Z,
+    # and every CI run in that window queued a job behind it.
+    timeout-minutes: 30
     environment: fly-${{ matrix.project }}
     concurrency:
       group: fly-${{ matrix.project }}
