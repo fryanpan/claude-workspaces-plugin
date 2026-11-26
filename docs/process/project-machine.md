@@ -80,6 +80,15 @@ bun run machine:deploy --project <project> [--memory 512] [--volume-gb 1] [--reg
     [--tunnel quick|named] [--tf-env prod|staging] [--dry-run]
 ```
 
+For a project `machines.json` lists, use `bun
+infra/project-machine/machines.ts deploy --project <project>`: it passes
+the entry's settings. `machine:deploy` by hand gets the same result. It
+fills in the entry's tunnel, memory, lead board, push repos and seed board
+where you leave them out, and refuses a value that differs from the entry,
+so a run that forgets `--seed-board` no longer removes the seed board's
+settings. To change a
+listed machine's settings, change `machines.json` in a PR.
+
 It reads what exists and does only what is missing. Steps 1 to 5 and the
 push keys run only inside `fly-provision.yml`; on the Mac a run that would
 make one is refused before anything changes, naming the workflow.

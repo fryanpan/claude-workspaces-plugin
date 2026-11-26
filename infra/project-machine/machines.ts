@@ -192,6 +192,56 @@ export function deployArgs(m: Machine, ref: string, dryRun: boolean, noOutputs =
   ];
 }
 
+/**
+ * `machine:deploy`'s arguments with a listed project's entry filled in. A
+ * run by hand that left out `--seed-board` used to take the seed board's
+ * settings away, and one without `--tunnel` came up on a quick tunnel. So a
+ * flag the entry sets is added when it is missing, and a value that differs
+ * from the entry is refused: machines.json is what a merge decided. An
+ * unlisted project's arguments are returned unchanged.
+ */
+export function listedArgs(
+  args: readonly string[],
+  machines: readonly Machine[],
+): { args: string[]; added: string[] } {
+  const i = args.indexOf('--project');
+  const m = i >= 0 ? machines.find((x) => x.project === args[i + 1]) : undefined;
+  if (!m) return { args: [...args], added: [] };
+  const out = [...args];
+  const added: string[] = [];
+  const refuse = (entry: string) => {
+    throw new Error(
+      `machines.json lists ${m.project} with ${entry}: change machines.json, or run machines.ts deploy --project ${m.project}`,
+    );
+  };
+  const scalar: [string, string | undefined][] = [
+    ['--tunnel', m.tunnel],
+    ['--memory', m.memory !== undefined ? String(m.memory) : undefined],
+    ['--lead-board', m.leadBoard],
+    ['--seed-board', m.seedBoard],
+  ];
+  for (const [name, want] of scalar) {
+    const at = args.indexOf(name);
+    if (at < 0) {
+      if (want !== undefined) {
+        out.push(name, want);
+        added.push(`${name} ${want}`);
+      }
+    } else if (args[at + 1] !== want) refuse(want === undefined ? `no ${name}` : `${name} ${want}`);
+  }
+  const given = args.flatMap((a, j) => (a === '--push-repo' ? [args[j + 1] ?? ''] : []));
+  const want = m.pushRepos ?? [];
+  if (given.length === 0) {
+    for (const r of want) {
+      out.push('--push-repo', r);
+      added.push(`--push-repo ${r}`);
+    }
+  } else if (given.length !== want.length || !given.every((r) => want.includes(r))) {
+    refuse(want.length > 0 ? `--push-repo ${want.join(' --push-repo ')}` : 'no --push-repo');
+  }
+  return { args: out, added };
+}
+
 const PASSED = new Set(['--refresh-push-keys', '--refresh-tunnel-token']);
 
 /** The flags after `--` that pass through to `machine:deploy`. Throws on any other. */
