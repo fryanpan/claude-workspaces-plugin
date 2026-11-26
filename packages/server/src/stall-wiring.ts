@@ -1443,8 +1443,8 @@ export function createStallWiring(ctx: StallWiringContext): StallWiring {
       } finally {
         threadsAhead?.drop();
       }
-      keepMoving.observe(snapshots, Date.now());
-      doneWhenReady.tick(Date.now());
+      keepMoving.observe(snapshots, stallNow());
+      doneWhenReady.tick(stallNow());
       return snapshots;
     },
     // Addressed, never broadcast, and `agentsOn` rather than `count` for the
