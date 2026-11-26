@@ -49,13 +49,13 @@ export const EXTENSIONS = ['.ts', '.tsx', '.mjs', '.css'];
 
 /**
  * Directories never worth counting, and the one generated artifact that lives
- * under a source path: `packages/plugin/mcp/index.js` is a committed bundle
+ * under a source path: `packages/plugin/mcp/relay.js` is a committed bundle
  * (CI rebuilds it and fails on drift), so its length is an output, not a
  * decision anybody makes. It is a `.js` file so the extension filter already
  * excludes it; naming it here keeps that from being an accident.
  */
 const SKIP_DIRS = new Set(['node_modules', 'dist', '.git']);
-const SKIP_FILES = new Set([join('packages', 'plugin', 'mcp', 'index.js')]);
+const SKIP_FILES = new Set([join('packages', 'plugin', 'mcp', 'relay.js')]);
 
 /** `wc -l` semantics: count newlines, so the numbers agree with the doc. */
 export function countLines(text: string): number {

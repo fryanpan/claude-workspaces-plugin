@@ -8,8 +8,8 @@
  *    handler hand-copies fields out of the route response, which is exactly
  *    the layer that silently dropped `groups` once already: every layer under
  *    it reports success while the caller gets nothing usable back.
- *  - **The bundle.** Peers load the committed `packages/plugin/mcp/index.js`,
- *    not the source, and a tool description IS the deliverable when the change
+ *  - **The running child.** What `tools/list` returns, not the source text:
+ *    a tool description IS the deliverable when the change
  *    is "here is the new way to say this" — there is no behaviour to notice,
  *    so nothing else reports the miss.
  *

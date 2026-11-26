@@ -3,10 +3,10 @@
  *
  * Two things this guards, both of which have gone wrong here before:
  *
- *  - **The bundle.** `.mcp.json` loads the committed
- *    `packages/plugin/mcp/index.js`, not the source. A description edited in
- *    `mcp.ts` and never rebuilt is invisible to every peer — which is exactly
- *    how PR #69 shipped a schema change nobody received. A tool description IS
+ *  - **The running child.** What a client receives from `tools/list`, not the
+ *    source text. When peers loaded a committed bundle, a description edited
+ *    in `mcp.ts` and never rebuilt was invisible to every peer — which is
+ *    exactly how PR #69 shipped a schema change nobody received. A tool description IS
  *    the deliverable when the change is "steer the agent to the other verb":
  *    there is no behaviour to notice, so nothing else would report the miss.
  *  - **The forwarding.** The server routes are covered end to end
@@ -123,11 +123,9 @@ describe('the create handler forwards placement rather than dropping it', () => 
 });
 
 /**
- * The single-row `create_task` is GONE, and gone from the artifact peers
- * actually load — `.mcp.json` runs `packages/plugin/mcp/index.js`, so a
- * source-only removal would leave every peer still seeing the tool on its next
- * restart. That is the exact shape of PR #69, which edited mcp.ts and never
- * rebuilt.
+ * The single-row `create_task` is GONE, and gone from what a running child
+ * declares — not only from the source text. PR #69 edited mcp.ts and never
+ * rebuilt the bundle peers then loaded, and every peer kept the old tool.
  *
  * The removal check used to be a regex over the bundle text, with a word
  * boundary to keep `create_task` from matching inside `create_tasks`. What the

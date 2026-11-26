@@ -101,7 +101,7 @@ Use `command claude`, not bare `claude`: once step 3's shell function exists, ba
 
 If they are changing the plugin itself and want a session to load their working copy, run `command claude plugin marketplace add .` from the clone root INSTEAD of the GitHub line. The marketplace is then this checkout, and a plugin update reads whatever it holds.
 
-There is **no `npm link` step** — the MCP server bundle is vendored into the plugin tree at `packages/plugin/mcp/index.js` and invoked via `${CLAUDE_PLUGIN_ROOT}` substitution in `.mcp.json`. (See PR #35 for why we moved off the `npm link` install path.)
+There is **no `npm link` step** — the MCP relay bundle is vendored into the plugin tree at `packages/plugin/mcp/relay.js` and invoked via `${CLAUDE_PLUGIN_ROOT}` substitution in `.mcp.json`. (See PR #35 for why we moved off the `npm link` install path.)
 
 After install, the plugin's tools should appear when they ask Claude things like:
 - "Show me the doc `<your doc name>` in a workspace"

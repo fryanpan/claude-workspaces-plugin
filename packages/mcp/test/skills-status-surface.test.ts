@@ -113,8 +113,7 @@ describe('no shipped skill still teaches progress as comments', () => {
 });
 
 describe('the shipped bundle carries the verb the skills name', () => {
-  // Peers load packages/plugin/mcp/index.js and never the source: a skill
-  // naming a tool that the installed bundle does not declare tells the agent
+  // A skill naming a tool that the running child does not declare tells the agent
   // to call something that does not exist.
   //
   // This used to be `BUNDLE.toContain('name: "post_status"')` — a string that

@@ -2,10 +2,12 @@
 /**
  * The MCP bundle-drift gate.
  *
- * Peers load `packages/plugin/mcp/index.js`, not the TypeScript under
- * `packages/mcp/src`. An edit to the source that never reaches the committed
- * bundle ships nothing, and the session that loads it reports success — which
- * is the failure mode this gate exists for.
+ * Sessions load `packages/plugin/mcp/relay.js`, the node relay, not the
+ * TypeScript under `packages/mcp/src/relay`. An edit to the source that never
+ * reaches the committed bundle ships nothing, and the session that loads it
+ * reports success — which is the failure mode this gate exists for. (The
+ * full child, `packages/plugin/mcp/index.js`, is no longer shipped; its last
+ * release is the git tag mcp-full-child-rollback.)
  *
  * The check is a rebuild plus a diff: build the bundle from today's source and
  * fail if the tracked artifact moved. It does NOT revert the rebuild. The fix
@@ -20,8 +22,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-export const BUNDLE = 'packages/plugin/mcp/index.js';
-/** The node relay, built by the same command (packages/mcp/src/relay/). */
+/** The node relay, built by `bun run build:mcp` (packages/mcp/src/relay/). */
 export const RELAY_BUNDLE = 'packages/plugin/mcp/relay.js';
 
 /** GitHub renders `::error::` as an annotation; a terminal renders it as noise. */
@@ -38,22 +39,16 @@ if (built.exitCode !== 0) {
   process.exit(built.exitCode ?? 1);
 }
 
-const diff = Bun.spawnSync(['git', 'diff', '--quiet', '--', BUNDLE, RELAY_BUNDLE], {
-  cwd: REPO_ROOT,
-});
+const diff = Bun.spawnSync(['git', 'diff', '--quiet', '--', RELAY_BUNDLE], { cwd: REPO_ROOT });
 if (diff.exitCode === 0) {
-  console.log(`✓ ${BUNDLE} and ${RELAY_BUNDLE} match a fresh build.`);
+  console.log(`✓ ${RELAY_BUNDLE} matches a fresh build.`);
   process.exit(0);
 }
 
-fail(
-  `${BUNDLE} or ${RELAY_BUNDLE} is stale — it does not match a fresh build of packages/mcp/src.`,
-);
-console.error('Peers load the committed bundle, not the TypeScript source, so an unrebuilt');
+fail(`${RELAY_BUNDLE} is stale — it does not match a fresh build of packages/mcp/src/relay.`);
+console.error('Sessions load the committed bundle, not the TypeScript source, so an unrebuilt');
 console.error('bundle ships nothing. The rebuild has already been written to your working');
-console.error(`tree — commit it:  git add ${BUNDLE} ${RELAY_BUNDLE}`);
-const stat = Bun.spawnSync(['git', 'diff', '--stat', '--', BUNDLE, RELAY_BUNDLE], {
-  cwd: REPO_ROOT,
-});
+console.error(`tree — commit it:  git add ${RELAY_BUNDLE}`);
+const stat = Bun.spawnSync(['git', 'diff', '--stat', '--', RELAY_BUNDLE], { cwd: REPO_ROOT });
 console.error(stat.stdout.toString());
 process.exit(1);

@@ -1,6 +1,6 @@
 /**
  * Restoring an archived GOAL through `unarchive_task`, end to end: the
- * SHIPPED BUNDLE over stdio, against a real server.
+ * full MCP child over stdio, against a real server.
  *
  * Before this, a goal's restore had a route and a board button but no tool,
  * so undoing a goal archive needed a person's hands. The store's half
@@ -24,7 +24,8 @@ import { join, resolve } from 'node:path';
 import { type ServerHandle, createServer } from '../src/server.ts';
 import { seedGoals } from './goal-seed.ts';
 
-const BUNDLE = resolve(import.meta.dir, '../../plugin/mcp/index.js');
+/** The full stdio child, run from source by this bun (its bundle is no longer shipped). */
+const MCP_SOURCE = resolve(import.meta.dir, '../../mcp/src/mcp.ts');
 const PERSON = { id: 'known-harbour', name: 'Harbourmaster', kind: 'known' };
 
 /** The env keys that name a session; the parent's must not reach the child. */
@@ -82,7 +83,7 @@ describe('unarchive_task restores an archived goal with its tasks', () => {
     }
     env.FEEDBACK_BASE_URL = `http://127.0.0.1:${handle.port}`;
     env.FEEDBACK_AGENT_NAME = 'Lighthouse Keeper';
-    child = spawn('node', [BUNDLE], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+    child = spawn(process.execPath, [MCP_SOURCE], { env, stdio: ['pipe', 'pipe', 'pipe'] });
     let buf = '';
     child.stdout?.on('data', (d: Buffer) => {
       buf += d.toString();

@@ -3,9 +3,8 @@
  *
  * A param can be declared in a tool's inputSchema and never put on the wire —
  * that is exactly how `groups` was accepted and discarded, and a unit test on
- * either side would have passed the whole time. So this drives the SHIPPED
- * BUNDLE (`packages/plugin/mcp/index.js`, the artifact peers actually load,
- * not the TypeScript source) over stdio and checks the server-side EFFECT.
+ * either side would have passed the whole time. So this drives the full MCP
+ * child over stdio and checks the server-side EFFECT.
  *
  * All fixtures are synthetic. The repo is public.
  */
@@ -16,9 +15,10 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { type ServerHandle, createServer } from '../src/server.ts';
 
-const BUNDLE = resolve(import.meta.dir, '../../plugin/mcp/index.js');
+/** The full stdio child, run from source by this bun (its bundle is no longer shipped). */
+const MCP_SOURCE = resolve(import.meta.dir, '../../mcp/src/mcp.ts');
 
-describe('the MCP tools file a doc in a workspace, through the real bundle', () => {
+describe('the MCP tools file a doc in a workspace, through the real child', () => {
   let handle: ServerHandle;
   let dataDir: string;
   let child: ReturnType<typeof spawn>;
@@ -65,7 +65,7 @@ describe('the MCP tools file a doc in a workspace, through the real bundle', () 
     dataDir = mkdtempSync(join(tmpdir(), 'mcp-doc-ws-'));
     handle = createServer({ port: 0, dataDir });
 
-    child = spawn('node', [BUNDLE], {
+    child = spawn(process.execPath, [MCP_SOURCE], {
       env: {
         ...process.env,
         // The MCP prefers this over port discovery, so the child talks to THIS

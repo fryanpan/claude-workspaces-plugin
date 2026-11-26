@@ -91,8 +91,8 @@ an agent the previous process was hosting is subscribed again before the
 first request after a restart.
 
 **A session's MCP child is a relay to `/mcp`.** `.mcp.json` still names
-`bin/claude-workspaces-mcp.sh`. The launcher tries three children in order,
-and every step down is silent and safe:
+`bin/claude-workspaces-mcp.sh`. The launcher tries two children in order,
+and the step down is silent and safe:
 
 1. On macOS, a Swift relay (`plugin/relay/relay.swift`). It is compiled with
    `/usr/bin/swiftc` into a per-user cache keyed by the source's hash, and must
@@ -100,16 +100,24 @@ and every step down is silent and safe:
 2. The node relay (`mcp/src/relay/`, bundled as `plugin/mcp/relay.js`). It is
    used when the compile is impossible or failed; a failed compile is not
    retried for a day.
-3. The full stdio child. It is used only with `CW_MCP_RELAY=0` (the rollback
-   lever). A session whose name, board or directory is not ASCII runs a relay
-   like any other: an HTTP header cannot carry those characters, so both relays
-   percent-encode the identity values and send `x-cw-identity-encoding:
-   percent`, and `server/src/connector/identity.ts` decodes them before it
-   checks them.
+
+A session whose name, board or directory is not ASCII runs a relay like any
+other: an HTTP header cannot carry those characters, so both relays
+percent-encode the identity values and send `x-cw-identity-encoding:
+percent`, and `server/src/connector/identity.ts` decodes them before it
+checks them.
+
+**The full stdio child is no longer shipped.** `plugin/mcp/index.js` ran the
+connector inside the session and was the rollback behind `CW_MCP_RELAY=0`.
+Its last release is the git tag `mcp-full-child-rollback`. `CW_MCP_RELAY=0`
+now makes the launcher exit with one line naming that tag; it never starts a
+relay in its place. To roll back, run a session from that tag's
+`packages/plugin` with `CW_MCP_RELAY=0`. The source, `mcp/src/mcp.ts`, still
+exists: the tests that drive a tool over stdio run it under bun.
 
 A board behind Cloudflare Access (`CW_ACCESS_CLIENT_ID` or
-`CW_ACCESS_SECRET_SERVICE` set) skips step 1. The node relay, the full child
-and the plugin's hooks each wrap their one fetch with
+`CW_ACCESS_SECRET_SERVICE` set) skips step 1. The node relay and the plugin's
+hooks each wrap their one fetch with
 `plugin/hooks/lib/access-headers.ts` (it lives with the hooks because they
 import nothing from the monorepo). It reads the service token's secret from
 Keychain and adds both Access headers to requests to the base URL's origin

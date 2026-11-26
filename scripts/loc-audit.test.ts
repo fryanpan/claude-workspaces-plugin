@@ -57,7 +57,7 @@ describe('isScannable', () => {
   it('skips generated and vendored trees, and the committed MCP bundle', () => {
     expect(isScannable('packages/demo/node_modules/big/index.ts')).toBe(false);
     expect(isScannable('packages/demo/dist/bundle.ts')).toBe(false);
-    expect(isScannable('packages/plugin/mcp/index.js')).toBe(false);
+    expect(isScannable('packages/plugin/mcp/relay.js')).toBe(false);
   });
 
   it('skips file types the bar does not cover', () => {
