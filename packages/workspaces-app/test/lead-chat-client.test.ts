@@ -352,7 +352,7 @@ describe('the lead chat client', () => {
     const meeting = {
       id: 'lcm-1',
       startedAt: 1,
-      by: { id: 'known-bryan', name: 'Bryan' },
+      by: { id: 'known-alice', name: 'Alice' },
       docId: 'd-salt',
       docTitle: 'Saltmarsh notes',
       notes: 'existing',
