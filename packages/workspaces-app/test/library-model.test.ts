@@ -289,4 +289,29 @@ describe('fileEntries', () => {
       'lost.md',
     ]);
   });
+
+  it('never puts a whiteboard in a burst: each one a person drew is its own row', () => {
+    const board = (name: string, at: number): LibraryRow => ({
+      name,
+      at,
+      href: `/workspaces/w-1/whiteboards/${name.toLowerCase().replace(/ /g, '-')}`,
+      docId: name,
+    });
+    const files = [
+      board('Quay layout', NOW),
+      board('Tide chart', NOW - SEC),
+      board('Ferry flow', NOW - 2 * SEC),
+      file('a.md', NOW - 3 * SEC),
+      file('b.md', NOW - 4 * SEC),
+      file('c.md', NOW - 5 * SEC),
+    ];
+    // The files written beside them still group: the rule is for a
+    // generator's run of files, and a whiteboard is never one.
+    expect(shape(fileEntries(files))).toEqual([
+      'Quay layout',
+      'Tide chart',
+      'Ferry flow',
+      '[3 files]',
+    ]);
+  });
 });

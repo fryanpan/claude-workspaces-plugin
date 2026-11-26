@@ -172,7 +172,9 @@ export const BURST_MIN = 3;
  * four sibling folders, and edits to one folder hours apart are not a burst.
  * A file with no clock reading is never in a burst — nothing measured puts it
  * beside anything, and nor is a row `solo` names: a meeting sits in Recent
- * files too, and a person's meeting is never part of a generator's run.
+ * files too, and a person's meeting is never part of a generator's run. Nor
+ * is a whiteboard: it is drawn by hand, so four made in a minute are four
+ * things a person made, each its own row.
  */
 export function fileEntries(
   files: readonly LibraryRow[],
@@ -189,7 +191,7 @@ export function fileEntries(
   for (const row of files) {
     const prev = run.at(-1);
     const t = rowClock(row, sort);
-    if (t === undefined || solo(row)) {
+    if (t === undefined || solo(row) || isWhiteboardRow(row)) {
       flush();
       out.push({ kind: 'file', row });
       continue;
@@ -200,6 +202,11 @@ export function fileEntries(
   }
   flush();
   return out;
+}
+
+/** A whiteboard's row: the only rows the server links to `/whiteboards/`. */
+function isWhiteboardRow(row: LibraryRow): boolean {
+  return row.href?.includes('/whiteboards/') === true;
 }
 
 /** The last segment of the deepest folder every row sits in, or `''` when
