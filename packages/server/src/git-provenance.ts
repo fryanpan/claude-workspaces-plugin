@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
 import { basename, dirname } from 'node:path';
 import { gitBarred, hardenedGitArgs, hardenedGitEnv } from './git-hardening.ts';
@@ -219,4 +219,48 @@ export function gitConflictHint(filePath: string, overwritten: string): string {
     ' matches what git left and `git status` will show the file modified. Let the doc go idle' +
     ' (~1s after its last edit) and then re-run the git command.'
   );
+}
+
+/** Whether git tracks a file: `untracked` only when it is in a repository
+ *  and git lists nothing for it. */
+export type GitTracking = 'tracked' | 'untracked' | 'unknown';
+
+/** Ceiling for the one asynchronous `ls-files` behind `gitTracking`. */
+const TRACKING_TIMEOUT_MS = 5_000;
+
+/**
+ * Does git track `filePath`? Asynchronous, so a slow repository holds no
+ * request: the caller acts on the answer when it comes. `unknown` for a file
+ * outside any repository, under a walled lead's project, or when git fails
+ * or overruns. A file git ignores is `untracked`: nothing pulled it there.
+ */
+export function gitTracking(
+  filePath: string,
+  timeoutMs: number = TRACKING_TIMEOUT_MS,
+): Promise<GitTracking> {
+  let resolved = filePath;
+  try {
+    resolved = realpathSync(filePath);
+  } catch {
+    // Missing or dangling: the call below answers `unknown`.
+  }
+  const cwd = dirname(resolved);
+  if (gitBarred(cwd)) return Promise.resolve('unknown');
+  // `--literal-pathspecs`: the basename is a file name, never a pattern.
+  const args = hardenedGitArgs(['--literal-pathspecs', 'ls-files', '-z', '--', basename(resolved)]);
+  return new Promise((done) => {
+    try {
+      execFile(
+        'git',
+        args,
+        { cwd, env: hardenedGitEnv(), timeout: timeoutMs, killSignal: 'SIGKILL', encoding: 'utf8' },
+        (err, stdout) => {
+          if (err) done('unknown');
+          else done(stdout.length > 0 ? 'tracked' : 'untracked');
+        },
+      );
+    } catch {
+      done('unknown');
+    }
+  });
 }

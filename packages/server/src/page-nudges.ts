@@ -100,6 +100,9 @@ function listedFace(entry: DocIndexEntry | undefined): string {
     m.diffStatus,
     m.diffAdditions,
     m.diffDeletions,
+    // Recently Created reads it (`createdOnBoard`), and it can flip after
+    // the bind that listed the doc.
+    m.seededFromFile,
     entry.threads.open,
     entry.threads.total,
   ]);
