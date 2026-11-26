@@ -77,6 +77,10 @@ function run(
     const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
     child.on('close', () => clearTimeout(timer));
 
+    // A launcher that refuses to start exits before it reads stdin, so the
+    // write can fail with EPIPE. That is the outcome under test, not an error;
+    // unhandled, it fails the whole vitest run (CI, PR 1820).
+    child.stdin.on('error', () => {});
     if (stdin !== undefined) child.stdin.write(stdin);
     if (!holdStdin) child.stdin.end();
   });
