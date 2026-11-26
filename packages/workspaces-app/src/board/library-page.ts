@@ -5,7 +5,7 @@
  * kind of doc really lives (mock v2).
  *
  * Four states, one at a time: the front page (Starred, the Recently Viewed /
- * Recently Created tabs, the folders, then the fold), the full list with a
+ * Recently Modified / Recently Created tabs, the folders, then the fold), the full list with a
  * way back, the docs in one location with a way back, and search results
  * while the box holds a term. A row is its title and one time — the page exists so that finding a
  * doc never needs a repo path, so no row carries one.
@@ -212,10 +212,14 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
   }
 
   /**
-   * A burst is known by where its newest file opens — unique per row, where a
-   * name is not — so a later load that adds files after it keeps it open.
+   * A burst is known by its clock and where its newest file opens — unique
+   * per row, where a name is not — so a later load that adds files after it
+   * keeps it open. The clock is in the key because Modified and Created can
+   * each hold a burst headed by the same file: opening one leaves the other
+   * shut.
    */
-  const burstKey = (rows: readonly LibraryRow[]): string => rows[0]?.open ?? rows[0]?.href ?? '';
+  const burstKey = (rows: readonly LibraryRow[], clock: LibrarySort): string =>
+    `${clock}:${rows[0]?.open ?? rows[0]?.href ?? ''}`;
 
   /**
    * One line for a burst, which opens in place onto its files. The line reads
@@ -224,7 +228,7 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
    */
   function entryHtml(entry: LibraryFileEntry, clock: LibrarySort = sort.files): string {
     if (entry.kind === 'file') return tree.rowHtml(entry.row, { clock, showFolder: true });
-    const key = burstKey(entry.rows);
+    const key = burstKey(entry.rows, clock);
     const open = expanded.has(key);
     const newest = entry.rows[0] as LibraryRow;
     const members = open
@@ -285,7 +289,7 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
     const recent = recentTabsHtml(tab, payload, {
       viewedOpen,
       rowHtml: tree.rowHtml,
-      entryHtml: (e) => entryHtml(e, 'created'),
+      entryHtml,
     });
     const rows = [...payload.meetings, ...payload.files];
     const starred = starredSectionHtml(stars.list(), rows, tree.rowHtml, tree.folderLinkHtml);
@@ -377,6 +381,10 @@ export function createLibraryPage(deps: LibraryPageDeps): LibraryPage {
       // the Library front page, and the address names the list, so a reload
       // or a shared link opens it.
       deps.history.pushState({ libraryList: 'files' }, '', deps.here('files', null));
+      // The full list opens on the clock of the tab it came from, so "See
+      // all" under Recently Created continues that list rather than another.
+      const clock = more.dataset.sort;
+      if (clock === 'created' || clock === 'modified') sort.files = clock;
       showList('files');
       return;
     }

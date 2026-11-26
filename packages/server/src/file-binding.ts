@@ -779,6 +779,24 @@ export class FileBindings {
     };
   }
 
+  /**
+   * Record, once, whether this doc's content was born on the board
+   * (`seededFromFile`, which the Library's Recently Created reads). An empty
+   * doc meeting a file already on disk, even an empty one, only gave that
+   * file a record: true. A file that does not exist yet is the board's to
+   * write: false. A doc that already has content meeting a file that exists
+   * says nothing either way, and that is every doc bound before the flag
+   * existed, so it stays unset and the Library counts it as not made here.
+   * Never changed once set: a later re-attach (a restart, a home move that
+   * exports an empty doc and binds it again) is not the doc's first fill.
+   */
+  private noteFirstFill(doc: LiveDoc, wasEmpty: boolean, fileExisted: boolean): void {
+    if (doc.meta.seededFromFile !== undefined) return;
+    if (fileExisted && !wasEmpty) return;
+    doc.meta.seededFromFile = fileExisted;
+    this.p.schedulePersist(doc);
+  }
+
   attachFile(
     docId: string,
     filePath: string,
@@ -827,7 +845,8 @@ export class FileBindings {
     const readFile = () => (pre ? (pre.text ?? '') : boundFiles.guards.readSync(abs));
     let seeded = false;
     let seedText: string | undefined;
-    if (fragment.length === 0 && fileExists()) {
+    const wasEmpty = fragment.length === 0;
+    if (wasEmpty && fileExists()) {
       try {
         const md = readFile();
         seedText = md;
@@ -843,6 +862,7 @@ export class FileBindings {
         return { ok: false, error: 'read-failed' };
       }
     }
+    this.noteFirstFill(doc, wasEmpty, fileExists());
     const existing = this.bindings.get(docId);
     if (existing?.writeTimer) clearTimeout(existing.writeTimer);
     if (existing?.readTimer) clearTimeout(existing.readTimer);

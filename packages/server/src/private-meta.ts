@@ -31,6 +31,7 @@ export const PRIVATE_META_KEYS = [
   'liveCheckout',
   'driftCheckouts',
   'bindingLostAt',
+  'seededFromFile',
 ] as const;
 
 export type PrivateMetaKey = (typeof PRIVATE_META_KEYS)[number];

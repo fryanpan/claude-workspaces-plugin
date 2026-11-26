@@ -6,7 +6,7 @@ import { boundFiles } from './slow-fs.ts';
 
 /**
  * The project's markdown files, as the Library lists them: the repo walk and
- * the stat behind each row's two clocks. Split out of `library.ts`, which
+ * the stat behind each row's modified clock. Split out of `library.ts`, which
  * re-exports all three names, so the build there stays a pure function over
  * injected sources.
  */
@@ -16,14 +16,27 @@ export interface ProjectFile {
   /** POSIX, relative to the repo root. */
   relPath: string;
   mtimeMs: number;
-  /** Birth time, when the filesystem reports one. */
-  createdMs?: number;
 }
 
-/** A stat's birth time, when the filesystem keeps one (0 or less means it
- *  does not). */
-export function birthOf(st: { birthtimeMs: number }): { createdMs?: number } {
-  return st.birthtimeMs > 0 ? { createdMs: st.birthtimeMs } : {};
+/**
+ * When the board made this doc, or undefined when it made nothing.
+ *
+ * Recently Created lists content born on the board: a doc with no file (a
+ * whiteboard, say), or one whose file did not exist until the board wrote
+ * it (`seededFromFile: false`). A doc that only gave a file already on disk
+ * a record has no created time, and neither does a bound doc from before
+ * the flag existed, which cannot say which it was. No file clock stands in:
+ * a `git pull` or a fresh clone writes a new file, so a birth time moves
+ * with every change that arrives that way, which is how Recently Created
+ * came to read as Recently Modified.
+ */
+export function createdOnBoard(meta: {
+  createdAt: number;
+  sourceUrl?: string;
+  seededFromFile?: boolean;
+}): number | undefined {
+  if (meta.sourceUrl === undefined || meta.seededFromFile === false) return meta.createdAt;
+  return undefined;
 }
 
 /** How long one repo walk is reused. A Library load is a page view, and a
@@ -112,7 +125,7 @@ function statOne(root: string, relPath: string): ProjectFile | null {
   } catch {
     return null;
   }
-  return st.isFile() ? { relPath, mtimeMs: st.mtimeMs, ...birthOf(st) } : null;
+  return st.isFile() ? { relPath, mtimeMs: st.mtimeMs } : null;
 }
 
 function statAll(root: string, rels: readonly string[]): ProjectFile[] {

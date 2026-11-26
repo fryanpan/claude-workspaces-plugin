@@ -5,7 +5,7 @@ import { attachmentIdOf, isAttachmentMember } from '@claude-workspaces/core';
 import { isReservedDocId } from './doc-ids.ts';
 import { makeDocKey, parseDocKey } from './doc-key.ts';
 import { type FolderState, type FolderView, folderOfDoc, liveFolders } from './library-folders.ts';
-import type { ProjectFile } from './library-lister.ts';
+import { type ProjectFile, createdOnBoard } from './library-lister.ts';
 import {
   type LibraryWhere,
   type Placed,
@@ -64,8 +64,9 @@ export interface LibraryRow {
    * rather than substituting a clock it does have.
    */
   at?: number;
-  /** Epoch ms — "Created". A file: its birth time on disk. A meeting: when
-   *  it started. Absent when unknown; the page sorts such a row last. */
+  /** Epoch ms — "Created": when the board made it (`createdOnBoard`). A
+   *  meeting: when it started. Absent for anything the board did not make,
+   *  a project file or a doc that only binds one; the page sorts it last. */
   created?: number;
   /** The key of the location this board doc lives in (`LibraryPayload.where`).
    *  Absent on a project file no doc holds. */
@@ -113,7 +114,7 @@ export interface LibraryPayload {
 }
 
 export type { MarkdownLister, ProjectFile } from './library-lister.ts';
-export { birthOf, createMarkdownLister } from './library-lister.ts';
+export { createMarkdownLister } from './library-lister.ts';
 
 /** One file in the project's mounted folders. */
 export interface MountedProjectFile extends ProjectFile {
@@ -138,8 +139,6 @@ export interface LibrarySources {
    * ways in one column.
    */
   fileMtime: (docId: string) => number | undefined;
-  /** When the file this doc is bound to was created on disk, if known. */
-  fileBirth?: (docId: string) => number | undefined;
   /** What `where` is built from; absent, no `where` is built. */
   placing?: Omit<PlacingContext, 'projectRepoKey' | 'projectVisible'>;
   /** The checkout a project's files are read from, or null when none is left. */
@@ -401,17 +400,20 @@ export function buildLibrary(src: LibrarySources): LibraryPayload {
       continue;
     }
     // The Files list's one clock, for a bound doc exactly as for a loose
-    // file: the bytes' own mtime.
+    // file: the bytes' own mtime. A whiteboard never has a file — it is its
+    // record alone — so its own last activity is its one clock. Any other
+    // doc whose file cannot be read keeps no reading rather than a stand-in.
     const fileRow: DocFileRow = {
       repoKey: parsed?.repoKey,
       relPath: keyRel,
       docId: meta.docId,
       title,
       href,
-      at: src.fileMtime(meta.docId),
-      // Birth of the bytes, else when the record was made: an agent's doc
-      // counts as created on the board as much as a person's.
-      created: src.fileBirth?.(meta.docId) ?? meta.createdAt,
+      at:
+        meta.type === 'whiteboard'
+          ? (meta.lastActivityAt ?? meta.createdAt)
+          : src.fileMtime(meta.docId),
+      created: createdOnBoard(meta),
     };
     docFiles.push(fileRow);
     const kind = meta.type === 'mockup' || meta.type === 'whiteboard' ? 'mockups' : 'documents';
@@ -465,12 +467,12 @@ export function buildLibrary(src: LibrarySources): LibraryPayload {
   for (const f of loose) {
     const name = names.get(f.relPath) ?? f.relPath;
     const folder = folderOf(f.relPath);
-    const born = extra({ created: f.createdMs });
+    // No created time: the board made none of these (`createdOnBoard`).
     if (isMarkdownPath(f.relPath)) {
-      files.push({ name, at: f.mtimeMs, open: f.relPath, folder, ...born });
+      files.push({ name, at: f.mtimeMs, open: f.relPath, folder });
     } else if (f.fileId) {
       const href = `/mounts/${encodeURIComponent(f.fileId)}/raw`;
-      files.push({ name, at: f.mtimeMs, href, folder, ...born });
+      files.push({ name, at: f.mtimeMs, href, folder });
     }
   }
 

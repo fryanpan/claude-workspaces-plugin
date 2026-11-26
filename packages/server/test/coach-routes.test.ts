@@ -164,6 +164,12 @@ describe('the coach is not on Home, and setup', () => {
     };
     expect(board.workspace.name).toBe('Coach');
     expect(board.workspace.docIds).toContain(docId);
+    // The server wrote both docs from its own templates, so the board made
+    // them: Recently Created lists them.
+    const lib = (await (await req(`/workspaces/${workspaceId}/library/items`, local())).json()) as {
+      files: { docId?: string; created?: number }[];
+    };
+    expect(lib.files.find((f) => f.docId === docId)?.created).toBeGreaterThan(0);
     const home = await landingAsOwner();
     expect(home).not.toContain(goalsUrl);
     expect(coachOnHome(home)).toEqual([]);

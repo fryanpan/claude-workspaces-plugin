@@ -41,9 +41,9 @@ const starredNames = (root: ParentNode) => {
   const tbl = head?.nextElementSibling;
   return tbl ? [...tbl.querySelectorAll('.library-name')].map((n) => n.textContent) : null;
 };
-const createdRow = (root: ParentNode, name: string) =>
+const modifiedRow = (root: ParentNode, name: string) =>
   [
-    ...(root.querySelector('[data-lf-panel=created] > .library-tbl') as Element).querySelectorAll(
+    ...(root.querySelector('[data-lf-panel=modified] > .library-tbl') as Element).querySelectorAll(
       '.library-row',
     ),
   ].find((r) => r.querySelector('.library-name')?.textContent === name) as HTMLElement;
@@ -62,15 +62,15 @@ describe('Starred', () => {
 
   it('stars an item from its ⋯ menu: it heads the page, and the menu then says Unstar', async () => {
     const { page, root, sent } = driveLibrary(WS, PAYLOAD, NOW, {
-      recentTab: 'created',
+      recentTab: 'modified',
       viewer: ALICE,
     });
     await page.open();
     expect(starredNames(root)).toBeNull();
     // The row carries no star of its own: the name gets that width.
     expect(root.querySelector('.library-row [data-lf-star]')).toBeNull();
-    const before = [...createdRow(root, 'Riverbend note 2').children].map((c) => c.className);
-    const star = (await starItem(createdRow(root, 'Riverbend note 2'))) as HTMLElement;
+    const before = [...modifiedRow(root, 'Riverbend note 2').children].map((c) => c.className);
+    const star = (await starItem(modifiedRow(root, 'Riverbend note 2'))) as HTMLElement;
     expect(star.textContent).toBe('Star');
     await click(star);
     // Picking it closes the menu.
@@ -78,7 +78,7 @@ describe('Starred', () => {
     expect(starredNames(root)).toEqual(['Riverbend note 2']);
     // Starred comes first on the page.
     expect(root.querySelector('.library-body h2')?.textContent).toBe('Starred');
-    const after = createdRow(root, 'Riverbend note 2');
+    const after = modifiedRow(root, 'Riverbend note 2');
     expect([...after.children].map((c) => c.className)).toEqual(before);
     expect((await starItem(after))?.textContent).toBe('Unstar');
     expect(sent.filter((c) => c.path.endsWith('/library/stars'))).toEqual([
@@ -93,7 +93,7 @@ describe('Starred', () => {
   it('unstars from the Starred list, and the list goes when it is empty', async () => {
     const starred = { ...PAYLOAD, starred: [{ kind: 'doc' as const, id: 'd-note-1', at: NOW }] };
     const { page, root, sent } = driveLibrary(WS, starred, NOW, {
-      recentTab: 'created',
+      recentTab: 'modified',
       viewer: ALICE,
     });
     await page.open();
@@ -111,7 +111,7 @@ describe('Starred', () => {
 
   it('stars a folder, and the folder opens from the Starred list', async () => {
     const { page, root, sent } = driveLibrary(WS, PAYLOAD, NOW, {
-      recentTab: 'created',
+      recentTab: 'modified',
       viewer: ALICE,
     });
     await page.open();
@@ -144,7 +144,7 @@ describe('Starred', () => {
 
   it('opens a starred subfolder with the folder above it', async () => {
     const starred = { ...PAYLOAD, starred: [{ kind: 'folder' as const, id: 'f-tide', at: NOW }] };
-    const { page, root } = driveLibrary(WS, starred, NOW, { recentTab: 'created', viewer: ALICE });
+    const { page, root } = driveLibrary(WS, starred, NOW, { recentTab: 'modified', viewer: ALICE });
     await page.open();
     await click(root.querySelector('[data-lf-reveal="f-tide"]') as HTMLElement);
     const names = [...root.querySelectorAll('.lf-tree .library-name')].map((n) => n.textContent);
@@ -155,22 +155,22 @@ describe('Starred', () => {
   it('puts a star back and says so when the server refuses it', async () => {
     const toasts: string[] = [];
     const { page, root } = driveLibrary(WS, PAYLOAD, NOW, {
-      recentTab: 'created',
+      recentTab: 'modified',
       viewer: ALICE,
       toasts,
       openAnswer: { ok: false, status: 500, data: null },
     });
     await page.open();
-    await flipStar(createdRow(root, 'Riverbend note 1'));
+    await flipStar(modifiedRow(root, 'Riverbend note 1'));
     await settle();
     expect(starredNames(root)).toBeNull();
     expect(toasts).toEqual(['Could not star that.']);
   });
 
   it('gives a reader with no name no Star item in the ⋯ menu', async () => {
-    const { page, root } = driveLibrary(WS, PAYLOAD, NOW, { recentTab: 'created' });
+    const { page, root } = driveLibrary(WS, PAYLOAD, NOW, { recentTab: 'modified' });
     await page.open();
-    expect(await starItem(createdRow(root, 'Riverbend note 1'))).toBeNull();
+    expect(await starItem(modifiedRow(root, 'Riverbend note 1'))).toBeNull();
     expect(document.querySelector('.lf-menu [data-lf-act="moveto"]')).not.toBeNull();
   });
 });

@@ -35,6 +35,9 @@ describe('private meta keys', () => {
       'liveCheckout',
       'owner',
       'producedBy',
+      // Whether the bound file was already on disk: a host fact, read only
+      // by the Library's created rule.
+      'seededFromFile',
       'sourceUrl',
       'workspaceRoot',
     ]);
