@@ -13,23 +13,7 @@ import {
 import { describe, expect, it } from 'vitest';
 import { createLeadChatClient } from '../src/lead-chat/lead-chat-client.ts';
 
-class FakeStream {
-  listeners = new Map<string, Array<(ev: MessageEvent) => void>>();
-  closed = false;
-  /** CONNECTING, as a stream opened for this client is. */
-  readyState = 0;
-  constructor(readonly url: string) {}
-  addEventListener(type: string, fn: (ev: MessageEvent) => void) {
-    this.listeners.set(type, [...(this.listeners.get(type) ?? []), fn]);
-  }
-  close() {
-    this.closed = true;
-  }
-  fire(type: string, data?: unknown) {
-    const ev = new MessageEvent(type, data === undefined ? {} : { data: JSON.stringify(data) });
-    for (const fn of this.listeners.get(type) ?? []) fn(ev);
-  }
-}
+import { FakeStream, settle } from './lead-chat-fake-stream.ts';
 
 const msg = (id: string, text: string, ts: number, extra: Partial<LeadChatMessage> = {}) =>
   ({
@@ -68,8 +52,6 @@ function setup(reads: unknown[]) {
   });
   return { client, calls, stream: () => stream as unknown as FakeStream };
 }
-
-const settle = () => new Promise((r) => setTimeout(r, 0));
 
 describe('the lead chat client', () => {
   it('reads the board conversation and listens on the board stream', async () => {
@@ -341,58 +323,6 @@ describe('the lead chat client', () => {
     expect(client.state().meeting?.lines).toEqual([line]);
     stream().fire(LEAD_CHAT_MEETING_EVENT, { workspaceId: 'w-harbor', meeting: null });
     expect(client.state().meeting).toBeNull();
-  });
-
-  it('keeps a meeting line heard while a read was out, whose answer predates it', async () => {
-    // A page opened while its stream is still connecting reads twice: once at
-    // once, and again when the stream opens. A line said in between reached
-    // the page as a frame and was then wiped by the second read's answer,
-    // taken before the line was said; the watching tab never showed it
-    // (lead-chat-meeting-browser, CI, 25 Nov).
-    const meeting = {
-      id: 'lcm-1',
-      startedAt: 1,
-      by: { id: 'known-alice', name: 'Alice' },
-      docId: 'd-salt',
-      docTitle: 'Saltmarsh notes',
-      notes: 'existing',
-      source: 'mic',
-      speakers: 'conversation',
-      recorder: 'rec-1',
-      people: [],
-      lines: [],
-    };
-    const stream = new FakeStream('board');
-    const answers: Array<(body: unknown) => void> = [];
-    const client = createLeadChatClient({
-      workspaceId: 'w-harbor',
-      stream: stream as unknown as EventSource,
-      fetch: (() =>
-        new Promise<Response>((resolve) => {
-          answers.push((body) => resolve(new Response(JSON.stringify(body))));
-        })) as unknown as typeof fetch,
-    });
-    answers[0]?.({ lead: null, messages: [], canTalk: true, meeting });
-    await settle();
-    expect(client.state().meeting?.id).toBe('lcm-1');
-    stream.fire('open');
-    expect(answers).toHaveLength(2);
-    const line = { turn: 0, who: 'Alice', text: 'The slipway opens at nine.', ts: 2 };
-    stream.fire(LEAD_CHAT_MEETING_LINE_EVENT, { workspaceId: 'w-harbor', meeting: 'lcm-1', line });
-    answers[1]?.({ lead: null, messages: [], canTalk: true, meeting });
-    await settle();
-    expect(client.state().meeting?.lines).toEqual([line]);
-    // A read taken AFTER the line holds it already, and keeps it once.
-    stream.fire('error');
-    stream.fire('open');
-    answers[2]?.({
-      lead: null,
-      messages: [],
-      canTalk: true,
-      meeting: { ...meeting, lines: [line] },
-    });
-    await settle();
-    expect(client.state().meeting?.lines).toEqual([line]);
   });
 
   it('pages back from the oldest message held until the server says it is the first', async () => {

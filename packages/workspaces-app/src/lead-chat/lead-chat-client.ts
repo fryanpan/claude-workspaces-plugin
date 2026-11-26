@@ -240,8 +240,13 @@ export function createLeadChatClient(opts: LeadChatClientOpts): LeadChatClient {
     try {
       const frame = JSON.parse((ev as MessageEvent).data) as LeadChatMeetingLineFrame;
       const m = state.meeting;
-      if (frame.workspaceId !== opts.workspaceId || !m || m.id !== frame.meeting) return;
-      if (readsOut > 0) heardLines.push({ meeting: m.id, line: frame.line, afterRead: readsSent });
+      if (frame.workspaceId !== opts.workspaceId) return;
+      // Kept even when this page holds no meeting yet: the read still out may
+      // be the one that brings it, without this line.
+      if (readsOut > 0) {
+        heardLines.push({ meeting: frame.meeting, line: frame.line, afterRead: readsSent });
+      }
+      if (!m || m.id !== frame.meeting) return;
       state = { ...state, meeting: { ...m, lines: upsertMeetingLine(m.lines, frame.line) } };
       changed();
       if (frame.line.lead) for (const fn of leadLines) fn(m.id, frame.line);
