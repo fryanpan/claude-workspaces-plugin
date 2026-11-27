@@ -78,21 +78,20 @@ function render(bunDir: string): Plist {
 }
 
 describe('resolve_bun_bin', () => {
-  it('takes bun from PATH first', () => {
+  it('prefers ~/.bun/bin/bun over PATH, as install.sh does', () => {
     const onPath = fakeBunDir(join(dir, 'harborlight'));
     const home = join(dir, 'home');
-    fakeBunDir(join(home, '.bun'));
+    const bunDir = fakeBunDir(join(home, '.bun'));
     const r = resolve(`${onPath}:/usr/bin:/bin`, home);
     expect(r.status).toBe(0);
-    expect(r.stdout.trim()).toBe(join(onPath, 'bun'));
+    expect(r.stdout.trim()).toBe(join(bunDir, 'bun'));
   });
 
-  it('falls back to ~/.bun/bin/bun when PATH has none', () => {
-    const home = join(dir, 'home');
-    const bunDir = fakeBunDir(join(home, '.bun'));
-    const r = resolve('/usr/bin:/bin', home);
+  it('falls back to PATH when ~/.bun/bin has none', () => {
+    const onPath = fakeBunDir(join(dir, 'harborlight'));
+    const r = resolve(`${onPath}:/usr/bin:/bin`, join(dir, 'empty-home'));
     expect(r.status).toBe(0);
-    expect(r.stdout.trim()).toBe(join(bunDir, 'bun'));
+    expect(r.stdout.trim()).toBe(join(onPath, 'bun'));
   });
 
   it('fails loudly when bun is nowhere', () => {

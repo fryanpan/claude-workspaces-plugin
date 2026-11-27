@@ -8,17 +8,19 @@
 
 # resolve_bun_bin
 #   Prints the absolute path of bun, or fails with a message on stderr.
+#   Same order as install.sh (~/.bun/bin first, then PATH), so the triage job
+#   runs the same bun as the server.
 #   launchd runs no login shell, so the job's PATH holds only what the plist
 #   names. The headless run spawns MCP servers (claude-hive among them) with
 #   `bun`, and without bun's directory on PATH they fail with "Executable not
 #   found in $PATH: bun".
 resolve_bun_bin() {
-    if command -v bun >/dev/null 2>&1; then
-        command -v bun
-    elif [ -x "${HOME}/.bun/bin/bun" ]; then
+    if [ -x "${HOME}/.bun/bin/bun" ]; then
         echo "${HOME}/.bun/bin/bun"
+    elif command -v bun >/dev/null 2>&1; then
+        command -v bun
     else
-        echo "error: bun not found (looked on PATH and in ~/.bun/bin)." >&2
+        echo "error: bun not found (looked in ~/.bun/bin and on PATH)." >&2
         echo "error: the triage job's MCP servers run on bun; install it first." >&2
         return 1
     fi

@@ -141,7 +141,8 @@ message is composed.
     its `cwd` ends in `ai-project-support`) listing these orphaned idle items
     (attachment sets by title + setId + board id + fileCount; standalone docs by
     title + reviewUrl + board id; days idle) so Bryan can decide. The same cap
-    applies: at most 25 items, oldest-idle first, and say how many remain. If no
+    applies: at most 25 items in total across every orphaned owner,
+    oldest-idle first, and say how many remain. If no
     conductor peer is found, skip — do not message anyone else.
 
 ## Hard constraints
