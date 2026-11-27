@@ -19,7 +19,7 @@
         <key>HOME</key>
         <string>{{HOME_DIR}}</string>
         <key>PATH</key>
-        <string>{{CLAUDE_DIR}}:/usr/local/bin:/usr/bin:/bin</string>
+        <string>{{CLAUDE_DIR}}:{{BUN_DIR}}:/usr/local/bin:/usr/bin:/bin</string>
         <key>CLAUDE_BIN</key>
         <string>{{CLAUDE_BIN}}</string>
     </dict>

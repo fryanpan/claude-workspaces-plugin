@@ -66,6 +66,12 @@ message is composed.
    shape has the owner; neither has both, which is why you fetch both. The board
    is `<b>`, the id you asked under — never infer it from anywhere else.
 
+   **Then drop every row whose `docId` starts with `task:` or `ws:`.** Those are
+   a board's own furniture — a task's thread doc and the board doc — not review
+   surfaces. `archive_doc` refuses them, so an owner told to archive one is
+   handed a call that cannot work. They are never candidates, whatever their
+   idle time.
+
 4. **Roll attachment sets up.** Group the joined rows by `setId`. For each set
    record: its `setId`, its board `<b>`, `fileCount` (member rows), `openThreads`
    (sum of every member's `threads.open`), `owner` (the first member that has
@@ -91,7 +97,15 @@ message is composed.
 
 6. **If nothing is left, do nothing and exit. Send no messages.**
 
-7. Group the surviving idle sets AND idle standalone docs by `owner`.
+7. Group the surviving idle sets AND idle standalone docs by `owner`. Within each
+   group, sort oldest-idle first (smallest `lastActivityAt` first). An attachment
+   set counts as ONE item, however many files it holds.
+
+   **Each recipient gets at most 25 items per run.** Take the first 25 of that
+   recipient's sorted list and hold the rest for a later run. Count the held
+   items: the message says how many remain. A backlog of hundreds must not land
+   in one message on one morning; the oldest go first, and the next run sends
+   the next 25 of whatever is still idle then.
 
 8. Call `mcp__claude-hive__list_peers` with scope `machine`. Each peer has a
    `cwd` and a `stable_id`.
@@ -108,6 +122,8 @@ message is composed.
    > `archive_attachment_set(workspaceId: "<board id>", setId: "<setId>")`]
    > [for each idle STANDALONE DOC: its title, reviewUrl, days idle, then
    > `archive_doc(workspaceId: "<board id>", docId: "<docId>")`].
+   > [if any were held back by the cap: "N more idle items are not listed
+   > here; they will come in later runs, oldest first."]
    > Keep the ones you're still waiting on Bryan for. No action needed if
    > they're all still in use."
 
@@ -124,8 +140,9 @@ message is composed.
     **conductor** (find it in `list_peers` — its summary contains "Conductor" or
     its `cwd` ends in `ai-project-support`) listing these orphaned idle items
     (attachment sets by title + setId + board id + fileCount; standalone docs by
-    title + reviewUrl + board id; days idle) so Bryan can decide. If no conductor
-    peer is found, skip — do not message anyone else.
+    title + reviewUrl + board id; days idle) so Bryan can decide. The same cap
+    applies: at most 25 items, oldest-idle first, and say how many remain. If no
+    conductor peer is found, skip — do not message anyone else.
 
 ## Hard constraints
 
@@ -151,4 +168,7 @@ message is composed.
   owners retire it with `archive_attachment_set`, never per-file.
 - Send nothing if nothing is idle.
 - Never message about active sets or non-idle standalone docs.
+- Never offer a `task:` or `ws:` doc. `archive_doc` refuses both.
+- At most 25 items per recipient per run, oldest-idle first, with the count of
+  the rest. Never send a recipient the whole backlog at once.
 - One message per recipient, concise. Then exit.

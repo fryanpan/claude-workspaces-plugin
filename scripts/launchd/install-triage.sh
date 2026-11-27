@@ -22,6 +22,9 @@ LOG_DIR="${HOME}/Library/Logs"
 # Same bootout-then-bootstrap window as install.sh, so the same helpers.
 # shellcheck source=scripts/launchd/bootstrap-retry.sh
 . "${SCRIPT_DIR}/bootstrap-retry.sh"
+# bun resolution and the template fill, sourced so a test can run them.
+# shellcheck source=scripts/launchd/render-triage-plist.sh
+. "${SCRIPT_DIR}/render-triage-plist.sh"
 
 # Resolve the claude CLI. launchd doesn't run a login shell, so we need an
 # absolute path. ~/.local/bin/claude is the official installer's location.
@@ -35,9 +38,15 @@ else
 fi
 CLAUDE_DIR="$(dirname "${CLAUDE_BIN}")"
 
+# The headless run's MCP servers start with `bun`, and launchd's PATH is only
+# what the plist names. Fail here, at install, rather than every morning.
+BUN_BIN="$(resolve_bun_bin)" || exit 1
+BUN_DIR="$(dirname "${BUN_BIN}")"
+
 echo "[install-triage] label:  ${LABEL}"
 echo "[install-triage] repo:   ${REPO_DIR}"
 echo "[install-triage] claude: ${CLAUDE_BIN}"
+echo "[install-triage] bun:    ${BUN_BIN}"
 echo "[install-triage] plist:  ${PLIST_DEST}"
 
 DOMAIN="gui/$(id -u)"
@@ -50,13 +59,7 @@ fi
 
 mkdir -p "$(dirname "${PLIST_DEST}")" "${LOG_DIR}"
 
-sed \
-    -e "s|{{REPO_DIR}}|${REPO_DIR}|g" \
-    -e "s|{{CLAUDE_BIN}}|${CLAUDE_BIN}|g" \
-    -e "s|{{CLAUDE_DIR}}|${CLAUDE_DIR}|g" \
-    -e "s|{{HOME_DIR}}|${HOME}|g" \
-    -e "s|{{LOG_DIR}}|${LOG_DIR}|g" \
-    "${TEMPLATE}" > "${PLIST_DEST}"
+render_triage_plist "${TEMPLATE}" > "${PLIST_DEST}"
 
 if ! bootstrap_with_retry "${DOMAIN}" "${PLIST_DEST}"; then
     exit 3
