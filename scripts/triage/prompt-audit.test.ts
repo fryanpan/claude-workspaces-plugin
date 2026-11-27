@@ -24,6 +24,19 @@ describe('doc-triage prompt', () => {
     // board cutover — a prompt naming them makes the agent improvise daily.
     expect(prompt).not.toContain('/api/docs');
   });
+
+  it('drops task: and ws: rows, which archive_doc refuses', () => {
+    const prompt = readTriagePrompt();
+    expect(prompt).toContain('drop every row whose `docId` starts with `task:` or `ws:`');
+  });
+
+  it('caps each recipient at 25 items, oldest first, and says how many remain', () => {
+    const prompt = readTriagePrompt();
+    // One run once counted ~1,250 waiting items, 416 for one owner.
+    expect(prompt).toContain('at most 25 items per run');
+    expect(prompt).toContain('oldest-idle first');
+    expect(prompt).toContain('more idle items are not listed');
+  });
 });
 
 describe('the scan itself', () => {
